@@ -1,0 +1,674 @@
+---
+description: OWASP ASVS Level 1 requirements for secure cryptography implementation in .NET applications
+globs: ["**/*.{cs,cshtml,razor}"]
+---
+
+# Cryptography Security (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V6 - Stored Cryptography",
+    "language": "dotnet"
+}
+
+## Overview
+
+Cryptography is essential for protecting sensitive data, but improper implementation can lead to false security. Level 1 cryptography requirements focus on the baseline cryptographic practices that all applications should follow to protect sensitive data.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v6.2.1",
+        "severity": "critical",
+        "description": "All cryptographic modules must fail securely, and errors must be handled in a way that does not enable oracle padding attacks",
+        "verification": "Verify that all cryptographic functions used to protect secrets from the application user fail securely"
+    },
+    {
+        "id": "v6.2.2",
+        "severity": "critical",
+        "description": "Industry proven or government approved cryptographic algorithms, modes, and libraries must be used, instead of custom coded cryptography",
+        "verification": "Verify that industry proven or government approved cryptographic algorithms, modes, and libraries are used"
+    },
+    {
+        "id": "v6.2.3",
+        "severity": "critical",
+        "description": "Encryption initialization vector, cipher configuration, and block modes must be configured securely using the latest advice",
+        "verification": "Verify that encryption initialization vectors, cipher configuration, and block modes are configured securely"
+    },
+    {
+        "id": "v6.2.5",
+        "severity": "critical",
+        "description": "Random number, encryption, or hashing algorithms must have appropriate parameters or seeds to ensure output cannot be predicted",
+        "verification": "Verify that random number, encryption or hashing algorithms are not used as a sole method of password hashing"
+    }
+]
+
+## Implementation Guidelines
+
+### Secure Encryption
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Use established encryption libraries and algorithms. Never implement your own cryptography. Use strong keys and initialization vectors."
+}
+
+#### .NET Example
+
+```csharp
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Extensions.Logging;
+
+namespace SecureCryptography
+{
+    public class EncryptionService
+    {
+        private readonly ILogger<EncryptionService> _logger;
+
+        public EncryptionService(ILogger<EncryptionService> logger)
+        {
+            _logger = logger;
+        }
+
+        // INSECURE: Using weak algorithm (DES)
+        public string EncryptInsecure(string plainText, byte[] key)
+        {
+            // NEVER DO THIS!
+            using (var des = DES.Create())
+            {
+                des.Key = key;
+                des.Mode = CipherMode.ECB; // ECB mode is also insecure
+                
+                using (var encryptor = des.CreateEncryptor())
+                using (var memoryStream = new MemoryStream())
+                using (var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write))
+                {
+                    byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+                    cryptoStream.Write(plainBytes, 0, plainBytes.Length);
+                    cryptoStream.FlushFinalBlock();
+                    
+                    return Convert.ToBase64String(memoryStream.ToArray());
+                }
+            }
+        }
+
+        // INSECURE: Hardcoded IV
+        public string EncryptWithHardcodedIV(string plainText, byte[] key)
+        {
+            // NEVER DO THIS!
+            using (var aes = Aes.Create())
+            {
+                aes.Key = key;
+                // Hardcoded IV - NEVER DO THIS!
+                aes.IV = new byte[16] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+                
+                using (var encryptor = aes.CreateEncryptor())
+                using (var memoryStream = new MemoryStream())
+                using (var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write))
+                {
+                    byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+                    cryptoStream.Write(plainBytes, 0, plainBytes.Length);
+                    cryptoStream.FlushFinalBlock();
+                    
+                    return Convert.ToBase64String(memoryStream.ToArray());
+                }
+            }
+        }
+
+        // SECURE: Using AES with random IV and authenticated encryption (GCM via AesGcm)
+        public EncryptedData EncryptSecure(string plainText, byte[] key)
+        {
+            // Validate key size (AES-256 requires 32 bytes)
+            if (key.Length != 32)
+            {
+                throw new ArgumentException("Key size must be 32 bytes for AES-256", nameof(key));
+            }
+
+            // Generate a random nonce (12 bytes is recommended for AesGcm)
+            byte[] nonce = new byte[12];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(nonce);
+            }
+
+            // Get plaintext bytes
+            byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+            
+            // Create output arrays
+            byte[] ciphertext = new byte[plainBytes.Length];
+            byte[] tag = new byte[16]; // Authentication tag
+            
+            // Encrypt and authenticate
+            using (var aesGcm = new AesGcm(key))
+            {
+                aesGcm.Encrypt(
+                    nonce,
+                    plainBytes,
+                    ciphertext,
+                    tag,
+                    null); // No associated data in this example
+            }
+
+            // Return encrypted data with all necessary components for decryption
+            return new EncryptedData
+            {
+                Ciphertext = Convert.ToBase64String(ciphertext),
+                Nonce = Convert.ToBase64String(nonce),
+                Tag = Convert.ToBase64String(tag)
+            };
+        }
+
+        // Fallback for older .NET versions without AesGcm: CBC mode with HMAC authentication
+        public EncryptedData EncryptSecureFallback(string plainText, byte[] key)
+        {
+            // Use proper authenticated encryption pattern: Encrypt-then-MAC
+            // Split the key into encryption key and MAC key
+            if (key.Length != 64) // Need 32 bytes for encryption + 32 bytes for MAC
+            {
+                throw new ArgumentException("Key size must be 64 bytes (32 for encryption, 32 for MAC)", nameof(key));
+            }
+
+            byte[] encryptionKey = new byte[32];
+            byte[] macKey = new byte[32];
+            Buffer.BlockCopy(key, 0, encryptionKey, 0, 32);
+            Buffer.BlockCopy(key, 32, macKey, 0, 32);
+
+            // Generate a random IV
+            byte[] iv;
+            using (var aes = Aes.Create())
+            {
+                aes.KeySize = 256;
+                aes.Mode = CipherMode.CBC;
+                aes.Padding = PaddingMode.PKCS7;
+                aes.GenerateIV();
+                iv = aes.IV;
+            }
+
+            // Encrypt the plaintext
+            byte[] ciphertext;
+            using (var aes = Aes.Create())
+            {
+                aes.Key = encryptionKey;
+                aes.IV = iv;
+                aes.Mode = CipherMode.CBC;
+
+                using (var encryptor = aes.CreateEncryptor())
+                using (var memoryStream = new MemoryStream())
+                using (var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write))
+                {
+                    byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+                    cryptoStream.Write(plainBytes, 0, plainBytes.Length);
+                    cryptoStream.FlushFinalBlock();
+                    ciphertext = memoryStream.ToArray();
+                }
+            }
+
+            // Compute MAC over IV and ciphertext
+            byte[] dataToMac = new byte[iv.Length + ciphertext.Length];
+            Buffer.BlockCopy(iv, 0, dataToMac, 0, iv.Length);
+            Buffer.BlockCopy(ciphertext, 0, dataToMac, iv.Length, ciphertext.Length);
+
+            byte[] mac;
+            using (var hmac = new HMACSHA256(macKey))
+            {
+                mac = hmac.ComputeHash(dataToMac);
+            }
+
+            // Return encrypted data with all components
+            return new EncryptedData
+            {
+                Ciphertext = Convert.ToBase64String(ciphertext),
+                Nonce = Convert.ToBase64String(iv),
+                Tag = Convert.ToBase64String(mac)
+            };
+        }
+
+        // SECURE: Decryption with proper error handling using AesGcm
+        public string DecryptSecure(EncryptedData encryptedData, byte[] key)
+        {
+            try
+            {
+                // Validate key size
+                if (key.Length != 32)
+                {
+                    throw new ArgumentException("Key size must be 32 bytes for AES-256", nameof(key));
+                }
+
+                // Decode components
+                byte[] ciphertext = Convert.FromBase64String(encryptedData.Ciphertext);
+                byte[] nonce = Convert.FromBase64String(encryptedData.Nonce);
+                byte[] tag = Convert.FromBase64String(encryptedData.Tag);
+
+                // Create output array
+                byte[] plaintext = new byte[ciphertext.Length];
+
+                // Decrypt and verify
+                using (var aesGcm = new AesGcm(key))
+                {
+                    aesGcm.Decrypt(
+                        nonce,
+                        ciphertext,
+                        tag,
+                        plaintext,
+                        null); // No associated data in this example
+                }
+
+                // Convert bytes to string
+                return Encoding.UTF8.GetString(plaintext);
+            }
+            catch (CryptographicException ex)
+            {
+                // Log the error securely - don't reveal details to caller
+                _logger.LogError(ex, "Decryption failed due to cryptographic error");
+                
+                // Throw a generic error to avoid leaking information
+                throw new CryptographicException("Decryption failed", ex);
+            }
+            catch (Exception ex)
+            {
+                // Log the error securely
+                _logger.LogError(ex, "Decryption failed due to unexpected error");
+                
+                // Throw a generic error to avoid leaking information
+                throw new CryptographicException("Decryption failed", ex);
+            }
+        }
+
+        // Fallback decryption for CBC mode with HMAC authentication
+        public string DecryptSecureFallback(EncryptedData encryptedData, byte[] key)
+        {
+            try
+            {
+                // Split the key into encryption key and MAC key
+                if (key.Length != 64)
+                {
+                    throw new ArgumentException("Key size must be 64 bytes (32 for encryption, 32 for MAC)", nameof(key));
+                }
+
+                byte[] encryptionKey = new byte[32];
+                byte[] macKey = new byte[32];
+                Buffer.BlockCopy(key, 0, encryptionKey, 0, 32);
+                Buffer.BlockCopy(key, 32, macKey, 0, 32);
+
+                // Decode components
+                byte[] ciphertext = Convert.FromBase64String(encryptedData.Ciphertext);
+                byte[] iv = Convert.FromBase64String(encryptedData.Nonce);
+                byte[] receivedMac = Convert.FromBase64String(encryptedData.Tag);
+
+                // Verify MAC first (Encrypt-then-MAC pattern)
+                byte[] dataToMac = new byte[iv.Length + ciphertext.Length];
+                Buffer.BlockCopy(iv, 0, dataToMac, 0, iv.Length);
+                Buffer.BlockCopy(ciphertext, 0, dataToMac, iv.Length, ciphertext.Length);
+
+                byte[] computedMac;
+                using (var hmac = new HMACSHA256(macKey))
+                {
+                    computedMac = hmac.ComputeHash(dataToMac);
+                }
+
+                // Use constant-time comparison for MAC verification
+                if (!CryptographicEquals(receivedMac, computedMac))
+                {
+                    throw new CryptographicException("Message authentication failed");
+                }
+
+                // Decrypt the ciphertext
+                using (var aes = Aes.Create())
+                {
+                    aes.Key = encryptionKey;
+                    aes.IV = iv;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.PKCS7;
+
+                    using (var decryptor = aes.CreateDecryptor())
+                    using (var memoryStream = new MemoryStream(ciphertext))
+                    using (var cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Read))
+                    using (var reader = new StreamReader(cryptoStream))
+                    {
+                        return reader.ReadToEnd();
+                    }
+                }
+            }
+            catch (CryptographicException ex)
+            {
+                // Log the error securely - don't reveal details to caller
+                _logger.LogError(ex, "Decryption failed due to cryptographic error");
+                
+                // Throw a generic error to avoid leaking information
+                throw new CryptographicException("Decryption failed", ex);
+            }
+            catch (Exception ex)
+            {
+                // Log the error securely
+                _logger.LogError(ex, "Decryption failed due to unexpected error");
+                
+                // Throw a generic error to avoid leaking information
+                throw new CryptographicException("Decryption failed", ex);
+            }
+        }
+
+        // SECURE: Generate a strong encryption key
+        public byte[] GenerateEncryptionKey()
+        {
+            // Generate a random 32-byte (256-bit) key
+            byte[] key = new byte[32];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(key);
+            }
+            return key;
+        }
+
+        // Constant-time comparison to prevent timing attacks
+        private bool CryptographicEquals(byte[] a, byte[] b)
+        {
+            // Verify lengths are equal
+            if (a.Length != b.Length)
+            {
+                return false;
+            }
+
+            int result = 0;
+            
+            // XOR each byte and OR the results
+            // This operates in constant time regardless of how many bytes match
+            for (int i = 0; i < a.Length; i++)
+            {
+                result |= a[i] ^ b[i];
+            }
+            
+            // If result is 0, all bytes matched
+            return result == 0;
+        }
+    }
+
+    // Data model to hold encrypted data components
+    public class EncryptedData
+    {
+        public string Ciphertext { get; set; }
+        public string Nonce { get; set; } // IV or Nonce
+        public string Tag { get; set; }   // Authentication tag or MAC
+    }
+}
+```
+
+### Secure Random Number Generation
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Use cryptographically secure random number generators for security-critical operations like generating keys, tokens, and IVs."
+}
+
+#### .NET Example
+
+```csharp
+using System;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace SecureCryptography
+{
+    public class SecureRandomGenerator
+    {
+        // INSECURE: Using System.Random for security purposes
+        public string GenerateTokenInsecure(int length = 32)
+        {
+            // NEVER DO THIS!
+            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            var random = new Random();
+            var token = new StringBuilder(length);
+            
+            for (int i = 0; i < length; i++)
+            {
+                token.Append(chars[random.Next(chars.Length)]);
+            }
+            
+            return token.ToString();
+        }
+
+        // SECURE: Using cryptographically strong random number generator
+        public string GenerateTokenSecure(int length = 32)
+        {
+            // Generate random bytes
+            byte[] randomBytes = new byte[length];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(randomBytes);
+            }
+            
+            // Convert to hexadecimal string
+            return BitConverter.ToString(randomBytes).Replace("-", "").Substring(0, length);
+        }
+
+        // SECURE: Generate a random string with a specific character set
+        public string GenerateRandomString(int length = 32, string charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        {
+            if (length <= 0)
+                throw new ArgumentException("Length must be positive", nameof(length));
+            
+            if (string.IsNullOrEmpty(charset))
+                throw new ArgumentException("Character set cannot be empty", nameof(charset));
+            
+            // Create a byte array to hold the random bytes
+            byte[] randomBytes = new byte[length];
+            
+            // Generate random bytes
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(randomBytes);
+            }
+            
+            // Create output string builder
+            var result = new StringBuilder(length);
+            
+            // Map random bytes to the character set
+            for (int i = 0; i < length; i++)
+            {
+                // Map byte to index of character set (ensuring even distribution)
+                int index = randomBytes[i] % charset.Length;
+                result.Append(charset[index]);
+            }
+            
+            return result.ToString();
+        }
+
+        // SECURE: Generate a random integer within a range (inclusive)
+        public int GetRandomInt(int min, int max)
+        {
+            if (min > max)
+                throw new ArgumentException("Min cannot be greater than max");
+            
+            // Calculate the range size
+            uint range = (uint)(max - min + 1);
+            
+            // Handle special case
+            if (range == 0)
+                return min;
+            
+            // Find the smallest number of bytes needed to represent the range
+            int bytesNeeded = 4; // We'll use 4 bytes (32 bits) for simplicity
+            
+            // Largest multiple of range that fits in the number of bytes
+            uint cutoff = (uint.MaxValue - range + 1) % range;
+            
+            // Create buffer for random bytes
+            byte[] randomBytes = new byte[bytesNeeded];
+            uint randomValue;
+            
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                do
+                {
+                    // Generate random bytes
+                    rng.GetBytes(randomBytes);
+                    
+                    // Convert to uint
+                    randomValue = BitConverter.ToUInt32(randomBytes, 0);
+                    
+                } while (randomValue < cutoff); // Ensure even distribution
+                
+                // Return the random integer within the specified range
+                return min + (int)(randomValue % range);
+            }
+        }
+
+        // SECURE: Generate a cryptographically secure random password
+        public string GenerateSecurePassword(int length = 16, bool includeSpecialChars = true)
+        {
+            if (length < 8)
+                throw new ArgumentException("Password length should be at least 8 characters", nameof(length));
+            
+            // Define character sets
+            const string lowerChars = "abcdefghijklmnopqrstuvwxyz";
+            const string upperChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const string numberChars = "0123456789";
+            const string specialChars = "!@#$%^&*()-_=+[]{}|;:,.<>?";
+            
+            // Combine character sets based on requirements
+            string allChars = lowerChars + upperChars + numberChars;
+            if (includeSpecialChars)
+                allChars += specialChars;
+            
+            // Generate a random password using the combined character set
+            var password = new StringBuilder(length);
+            byte[] randomBytes = new byte[length];
+            
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(randomBytes);
+                
+                // Ensure at least one character from each required set
+                password.Append(lowerChars[randomBytes[0] % lowerChars.Length]);
+                password.Append(upperChars[randomBytes[1] % upperChars.Length]);
+                password.Append(numberChars[randomBytes[2] % numberChars.Length]);
+                
+                if (includeSpecialChars)
+                    password.Append(specialChars[randomBytes[3] % specialChars.Length]);
+                
+                // Fill the rest with characters from the combined set
+                for (int i = includeSpecialChars ? 4 : 3; i < length; i++)
+                {
+                    password.Append(allChars[randomBytes[i] % allChars.Length]);
+                }
+            }
+            
+            // Shuffle the password characters to avoid predictable positions
+            return ShuffleString(password.ToString());
+        }
+
+        // Helper method to shuffle a string
+        private string ShuffleString(string input)
+        {
+            char[] chars = input.ToCharArray();
+            int n = chars.Length;
+            
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                // Fisher-Yates shuffle
+                while (n > 1)
+                {
+                    byte[] box = new byte[1];
+                    rng.GetBytes(box);
+                    int k = box[0] % n;
+                    n--;
+                    
+                    // Swap chars[n] and chars[k]
+                    char temp = chars[n];
+                    chars[n] = chars[k];
+                    chars[k] = temp;
+                }
+            }
+            
+            return new string(chars);
+        }
+
+        // SECURE: Generate a cryptographic key derived from a password
+        public byte[] DeriveKeyFromPassword(string password, byte[] salt, int keyLength = 32, int iterations = 350000)
+        {
+            if (string.IsNullOrEmpty(password))
+                throw new ArgumentException("Password cannot be empty", nameof(password));
+            
+            if (salt == null || salt.Length < 8)
+                throw new ArgumentException("Salt must be at least 8 bytes", nameof(salt));
+            
+            // Use PBKDF2 to derive a key from a password
+            using (var deriveBytes = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256))
+            {
+                return deriveBytes.GetBytes(keyLength);
+            }
+        }
+
+        // SECURE: Generate a random salt for password-based key derivation
+        public byte[] GenerateRandomSalt(int length = 16)
+        {
+            if (length < 8)
+                throw new ArgumentException("Salt should be at least 8 bytes", nameof(length));
+            
+            byte[] salt = new byte[length];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(salt);
+            }
+            return salt;
+        }
+    }
+}
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "custom_cryptography",
+        "wrong": "Implementing your own encryption algorithms or routines",
+        "correct": "Using established, well-tested libraries and algorithms from .NET's System.Security.Cryptography namespace",
+        "reason": "Custom cryptography almost always contains vulnerabilities that can be exploited"
+    },
+    {
+        "id": "weak_algorithms",
+        "wrong": "Using outdated or weak encryption algorithms (DES, MD5, SHA-1, etc.)",
+        "correct": "Using strong modern algorithms (AES-256, SHA-256 or better, AesGcm for authenticated encryption)",
+        "reason": "Weak algorithms can be broken through various cryptanalytic attacks"
+    },
+    {
+        "id": "insecure_random",
+        "wrong": "Using System.Random for security purposes",
+        "correct": "Using RandomNumberGenerator from System.Security.Cryptography",
+        "reason": "System.Random is not cryptographically secure and can lead to token prediction or replay attacks"
+    },
+    {
+        "id": "hardcoded_secrets",
+        "wrong": "Hardcoding encryption keys, IVs, or secrets in source code",
+        "correct": "Using Azure Key Vault, .NET Secret Manager, secure environment variables, or HSMs",
+        "reason": "Hardcoded values can be extracted from source code or compiled applications"
+    },
+    {
+        "id": "insecure_modes",
+        "wrong": "Using insecure block cipher modes like ECB",
+        "correct": "Using GCM (AesGcm) for authenticated encryption, or CBC with separate authentication (HMAC)",
+        "reason": "Insecure modes can leak information about encrypted data patterns"
+    },
+    {
+        "id": "missing_authentication",
+        "wrong": "Using encryption without message authentication",
+        "correct": "Using authenticated encryption like AesGcm or implementing Encrypt-then-MAC pattern",
+        "reason": "Unauthenticated encryption is vulnerable to tampering and padding oracle attacks"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Cryptographic Storage Cheat Sheet](https://cheatsheatseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html)
+- [NIST Recommendations for Key Management](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-57pt1r5.pdf)
+- [Microsoft Security Documentation on Data Protection in ASP.NET Core](https://docs.microsoft.com/en-us/aspnet/core/security/data-protection/introduction)
+- [Microsoft Cryptography Model Guidelines and Practices](https://docs.microsoft.com/en-us/dotnet/standard/security/cryptography-model)
+- [Microsoft Cryptography API: Next Generation (CNG)](https://docs.microsoft.com/en-us/windows/win32/seccng/cng-portal)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

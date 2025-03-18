@@ -1,0 +1,995 @@
+---
+description: OWASP ASVS Level 1 requirements for implementing secure access controls in .NET applications
+globs: ["**/*.{cs,cshtml,razor}"]
+---
+
+# Access Control Security (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V4 - Access Control",
+    "language": "dotnet"
+}
+
+## Overview
+
+Access control is a critical security function that ensures users can only access resources and perform actions they are authorized for. Level 1 access control requirements focus on the essential controls that all applications should implement to prevent unauthorized access to data and functionality.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v4.1.1",
+        "severity": "critical",
+        "description": "The application enforces access control rules on a trusted service layer",
+        "verification": "Verify that the application enforces access control rules on a trusted service layer, especially if client-side access control is present"
+    },
+    {
+        "id": "v4.1.2",
+        "severity": "critical",
+        "description": "All user and data attributes and policy information used for access controls cannot be manipulated by end users",
+        "verification": "Verify that all user and data attributes and policy information used for access controls cannot be manipulated by end users unless specifically authorized"
+    },
+    {
+        "id": "v4.1.3",
+        "severity": "critical",
+        "description": "The principle of least privilege exists - users should only have the minimum privileges necessary to perform their work",
+        "verification": "Verify that the principle of least privilege exists"
+    },
+    {
+        "id": "v4.1.5",
+        "severity": "critical",
+        "description": "Access controls fail securely, denying access by default",
+        "verification": "Verify that access controls fail securely including when an exception occurs"
+    }
+]
+
+## Implementation Guidelines
+
+### Server-Side Access Control
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Always enforce access control rules on the server side, regardless of client-side restrictions. Never rely solely on client-side access controls or hidden elements to restrict access."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+
+namespace SecureApp.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class DocumentsController : ControllerBase
+    {
+        private readonly ILogger<DocumentsController> _logger;
+        private readonly IDocumentService _documentService;
+
+        // Sample in-memory document store with ownership
+        private static readonly Dictionary<string, Document> Documents = new Dictionary<string, Document>
+        {
+            ["doc1"] = new Document { Id = "doc1", Title = "User Document", OwnerId = "user123", Content = "Private content" },
+            ["doc2"] = new Document { Id = "doc2", Title = "Admin Document", OwnerId = "admin456", Content = "Confidential data" },
+            ["doc3"] = new Document { Id = "doc3", Title = "Public Document", OwnerId = "system", Content = "Public content", IsPublic = true }
+        };
+
+        public DocumentsController(ILogger<DocumentsController> logger, IDocumentService documentService)
+        {
+            _logger = logger;
+            _documentService = documentService;
+        }
+
+        // INSECURE: Relying only on client-side to hide admin functionality
+        /*
+        public IActionResult SetupUI()
+        {
+            var isAdmin = User.IsInRole("Admin");
+            
+            // Send a flag to the client indicating if admin panel should be shown
+            return Ok(new { showAdminPanel = isAdmin });
+            
+            // Client-side code would then do:
+            // if (data.showAdminPanel) {
+            //    document.getElementById('adminPanel').style.display = 'block';
+            // }
+        }
+        */
+
+        // SECURE: Public endpoint - accessible to all
+        [HttpGet("public")]
+        [AllowAnonymous]
+        public IActionResult GetPublicDocuments()
+        {
+            var publicDocs = Documents.Values
+                .Where(d => d.IsPublic)
+                .Select(d => new { d.Id, d.Title, d.OwnerId })
+                .ToList();
+
+            return Ok(publicDocs);
+        }
+
+        // SECURE: Protected endpoint that requires authentication
+        [HttpGet]
+        [Authorize]
+        public IActionResult GetDocuments()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var isAdmin = User.IsInRole("Admin");
+
+            // Users can see their own documents and public documents
+            // Admins can see all documents
+            var accessibleDocs = Documents.Values
+                .Where(d => d.IsPublic || d.OwnerId == userId || isAdmin)
+                .ToList();
+
+            return Ok(accessibleDocs);
+        }
+
+        // SECURE: Get specific document with authorization check
+        [HttpGet("{id}")]
+        [Authorize]
+        public IActionResult GetDocument(string id)
+        {
+            // Verify the document exists
+            if (!Documents.TryGetValue(id, out var document))
+            {
+                _logger.LogWarning("Document not found: {DocumentId}", id);
+                return NotFound(new { error = "Document not found" });
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var isAdmin = User.IsInRole("Admin");
+
+            // Check access permissions:
+            // 1. Document is public, or
+            // 2. User is the document owner, or
+            // 3. User is an admin
+            if (document.IsPublic || document.OwnerId == userId || isAdmin)
+            {
+                return Ok(document);
+            }
+
+            // Log unauthorized access attempt
+            _logger.LogWarning("Unauthorized document access attempt: User {UserId} tried to access document {DocumentId}",
+                userId, id);
+
+            // Access denied - return 403 Forbidden
+            return Forbid();
+        }
+
+        // SECURE: Create document with proper authorization
+        [HttpPost]
+        [Authorize]
+        public IActionResult CreateDocument([FromBody] DocumentCreateDto documentDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            var newDocument = new Document
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Title = documentDto.Title,
+                Content = documentDto.Content,
+                OwnerId = userId,
+                IsPublic = documentDto.IsPublic
+            };
+
+            // In a real application, this would be saved to a database
+            Documents[newDocument.Id] = newDocument;
+
+            _logger.LogInformation("Document created: {DocumentId} by user {UserId}", newDocument.Id, userId);
+
+            return CreatedAtAction(nameof(GetDocument), new { id = newDocument.Id },
+                new { newDocument.Id, newDocument.Title, newDocument.OwnerId, newDocument.IsPublic });
+        }
+
+        // SECURE: Update document with ownership check
+        [HttpPut("{id}")]
+        [Authorize]
+        public IActionResult UpdateDocument(string id, [FromBody] DocumentUpdateDto updateDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // Verify the document exists
+            if (!Documents.TryGetValue(id, out var document))
+            {
+                return NotFound(new { error = "Document not found" });
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var isAdmin = User.IsInRole("Admin");
+
+            // Check update permissions (only owner or admin can update)
+            if (document.OwnerId != userId && !isAdmin)
+            {
+                _logger.LogWarning("Unauthorized document update attempt: User {UserId} tried to update document {DocumentId}",
+                    userId, id);
+                return Forbid();
+            }
+
+            // Update document
+            if (!string.IsNullOrEmpty(updateDto.Title))
+                document.Title = updateDto.Title;
+
+            if (!string.IsNullOrEmpty(updateDto.Content))
+                document.Content = updateDto.Content;
+
+            if (updateDto.IsPublic.HasValue)
+                document.IsPublic = updateDto.IsPublic.Value;
+
+            _logger.LogInformation("Document updated: {DocumentId} by user {UserId}", id, userId);
+
+            return Ok(new { document.Id, document.Title, document.OwnerId, document.IsPublic });
+        }
+
+        // SECURE: Delete document with ownership check
+        [HttpDelete("{id}")]
+        [Authorize]
+        public IActionResult DeleteDocument(string id)
+        {
+            // Verify the document exists
+            if (!Documents.TryGetValue(id, out var document))
+            {
+                return NotFound(new { error = "Document not found" });
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var isAdmin = User.IsInRole("Admin");
+
+            // Check delete permissions (only owner or admin can delete)
+            if (document.OwnerId != userId && !isAdmin)
+            {
+                _logger.LogWarning("Unauthorized document deletion attempt: User {UserId} tried to delete document {DocumentId}",
+                    userId, id);
+                return Forbid();
+            }
+
+            // Delete document
+            Documents.Remove(id);
+
+            _logger.LogInformation("Document deleted: {DocumentId} by user {UserId}", id, userId);
+
+            return Ok(new { message = "Document deleted successfully" });
+        }
+
+        // SECURE: Admin-only endpoint
+        [HttpGet("admin/all")]
+        [Authorize(Roles = "Admin")]
+        public IActionResult GetAllDocumentsAdmin()
+        {
+            // This endpoint is only accessible to admins due to the Authorize attribute
+            return Ok(Documents.Values.ToList());
+        }
+    }
+
+    // Model classes
+    public class Document
+    {
+        public string Id { get; set; }
+        public string Title { get; set; }
+        public string Content { get; set; }
+        public string OwnerId { get; set; }
+        public bool IsPublic { get; set; }
+    }
+
+    public class DocumentCreateDto
+    {
+        public string Title { get; set; }
+        public string Content { get; set; }
+        public bool IsPublic { get; set; }
+    }
+
+    public class DocumentUpdateDto
+    {
+        public string Title { get; set; }
+        public string Content { get; set; }
+        public bool? IsPublic { get; set; }
+    }
+
+    public interface IDocumentService
+    {
+        // Interface methods would go here
+    }
+}
+```
+
+### Principle of Least Privilege
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Assign the minimum privileges necessary for users to perform their functions. Use role-based access control and permission checks to limit what users can access or modify."
+}
+
+#### ASP.NET Core Example with Policy-Based Authorization
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace SecureApp
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddControllers();
+
+            // Add authentication services
+            services.AddAuthentication(options =>
+            {
+                options.DefaultScheme = "Cookies";
+                options.DefaultChallengeScheme = "oidc";
+            })
+            .AddCookie("Cookies")
+            .AddOpenIdConnect("oidc", options =>
+            {
+                // Configure your OpenID Connect settings here
+                options.Authority = Configuration["Auth:Authority"];
+                options.ClientId = Configuration["Auth:ClientId"];
+                options.ClientSecret = Configuration["Auth:ClientSecret"];
+                options.ResponseType = "code";
+                options.SaveTokens = true;
+                options.GetClaimsFromUserInfoEndpoint = true;
+                options.Scope.Add("profile");
+                options.Scope.Add("email");
+                options.Scope.Add("api");
+            });
+
+            // Add authorization with policies
+            services.AddAuthorization(options =>
+            {
+                // Define policy for reading any article
+                options.AddPolicy("ReadAnyArticle", policy =>
+                    policy.RequireRole("Admin", "Editor"));
+
+                // Define policy for creating articles
+                options.AddPolicy("CreateArticle", policy =>
+                    policy.RequireRole("Admin", "Editor", "Writer"));
+
+                // Define policy for editing articles
+                options.AddPolicy("EditAnyArticle", policy =>
+                    policy.RequireRole("Admin", "Editor"));
+
+                // Define policy for editing own articles
+                options.AddPolicy("EditOwnArticle", policy =>
+                    policy.Requirements.Add(new ArticleOwnerRequirement()));
+
+                // Define policy for publishing articles
+                options.AddPolicy("PublishArticle", policy =>
+                    policy.RequireRole("Admin", "Editor"));
+
+                // Define policy for deleting articles
+                options.AddPolicy("DeleteArticle", policy =>
+                    policy.RequireRole("Admin"));
+
+                // Define policy for managing users
+                options.AddPolicy("ManageUsers", policy =>
+                    policy.RequireRole("Admin"));
+            });
+
+            // Register the authorization handler
+            services.AddSingleton<IAuthorizationHandler, ArticleOwnerAuthorizationHandler>();
+            services.AddSingleton<IArticleService, ArticleService>();
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                app.UseHsts();
+            }
+
+            app.UseHttpsRedirection();
+            app.UseStaticFiles();
+
+            app.UseRouting();
+
+            // Add authentication and authorization middleware
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+            });
+        }
+    }
+
+    // Custom authorization requirement for article ownership
+    public class ArticleOwnerRequirement : IAuthorizationRequirement { }
+
+    // Custom authorization handler to check article ownership
+    public class ArticleOwnerAuthorizationHandler : AuthorizationHandler<ArticleOwnerRequirement, Article>
+    {
+        protected override Task HandleRequirementAsync(
+            AuthorizationHandlerContext context,
+            ArticleOwnerRequirement requirement,
+            Article resource)
+        {
+            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // Check if the user is the owner of the article
+            if (userId == resource.AuthorId)
+            {
+                context.Succeed(requirement);
+            }
+            // If user is an admin or editor, they can also edit articles they don't own
+            else if (context.User.IsInRole("Admin") || context.User.IsInRole("Editor"))
+            {
+                context.Succeed(requirement);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    [ApiController]
+    [Route("api/[controller]")]
+    public class ArticlesController : ControllerBase
+    {
+        private readonly IArticleService _articleService;
+        private readonly IAuthorizationService _authorizationService;
+
+        public ArticlesController(
+            IArticleService articleService,
+            IAuthorizationService authorizationService)
+        {
+            _articleService = articleService;
+            _authorizationService = authorizationService;
+        }
+
+        // Endpoint to list articles with proper filtering based on user permissions
+        [HttpGet]
+        [Authorize]
+        public async Task<IActionResult> GetArticles()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var canReadAny = User.IsInRole("Admin") || User.IsInRole("Editor");
+
+            IEnumerable<Article> articles;
+
+            if (canReadAny)
+            {
+                // Admins and editors can see all articles
+                articles = await _articleService.GetAllArticlesAsync();
+            }
+            else
+            {
+                // Regular users can only see published articles and their own drafts
+                articles = await _articleService.GetVisibleArticlesForUserAsync(userId);
+            }
+
+            return Ok(articles);
+        }
+
+        // Endpoint to get a specific article with authorization
+        [HttpGet("{id}")]
+        [Authorize]
+        public async Task<IActionResult> GetArticle(string id)
+        {
+            var article = await _articleService.GetArticleByIdAsync(id);
+
+            if (article == null)
+            {
+                return NotFound();
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // Check if the user has permission to view this article
+            if (article.Published || article.AuthorId == userId ||
+                User.IsInRole("Admin") || User.IsInRole("Editor"))
+            {
+                return Ok(article);
+            }
+
+            return Forbid();
+        }
+
+        // Endpoint to create an article
+        [HttpPost]
+        [Authorize(Policy = "CreateArticle")]
+        public async Task<IActionResult> CreateArticle([FromBody] ArticleCreateDto articleDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            var article = new Article
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Title = articleDto.Title,
+                Content = articleDto.Content,
+                AuthorId = userId,
+                Created = DateTime.UtcNow,
+                Updated = DateTime.UtcNow,
+                Published = false // New articles are not published by default
+            };
+
+            await _articleService.CreateArticleAsync(article);
+
+            return CreatedAtAction(nameof(GetArticle), new { id = article.Id }, article);
+        }
+
+        // Endpoint to update an article with resource-based authorization
+        [HttpPut("{id}")]
+        [Authorize]
+        public async Task<IActionResult> UpdateArticle(string id, [FromBody] ArticleUpdateDto articleDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var article = await _articleService.GetArticleByIdAsync(id);
+
+            if (article == null)
+            {
+                return NotFound();
+            }
+
+            // Perform resource-based authorization
+            var authorizationResult = await _authorizationService.AuthorizeAsync(
+                User, article, "EditOwnArticle");
+
+            if (!authorizationResult.Succeeded)
+            {
+                return Forbid();
+            }
+
+            // Update article properties
+            if (!string.IsNullOrEmpty(articleDto.Title))
+                article.Title = articleDto.Title;
+
+            if (!string.IsNullOrEmpty(articleDto.Content))
+                article.Content = articleDto.Content;
+
+            article.Updated = DateTime.UtcNow;
+
+            await _articleService.UpdateArticleAsync(article);
+
+            return Ok(article);
+        }
+
+        // Endpoint to publish an article
+        [HttpPost("{id}/publish")]
+        [Authorize(Policy = "PublishArticle")]
+        public async Task<IActionResult> PublishArticle(string id)
+        {
+            var article = await _articleService.GetArticleByIdAsync(id);
+
+            if (article == null)
+            {
+                return NotFound();
+            }
+
+            article.Published = true;
+            article.PublishedAt = DateTime.UtcNow;
+            article.Updated = DateTime.UtcNow;
+
+            await _articleService.UpdateArticleAsync(article);
+
+            return Ok(article);
+        }
+
+        // Endpoint to delete an article
+        [HttpDelete("{id}")]
+        [Authorize]
+        public async Task<IActionResult> DeleteArticle(string id)
+        {
+            var article = await _articleService.GetArticleByIdAsync(id);
+
+            if (article == null)
+            {
+                return NotFound();
+            }
+
+            var isAdmin = User.IsInRole("Admin");
+            var isAuthor = article.AuthorId == User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // Only admins can delete any article, authors can only delete their own
+            if (isAdmin || isAuthor)
+            {
+                await _articleService.DeleteArticleAsync(id);
+                return Ok(new { message = "Article deleted successfully" });
+            }
+
+            return Forbid();
+        }
+    }
+
+    // Model classes
+    public class Article
+    {
+        public string Id { get; set; }
+        public string Title { get; set; }
+        public string Content { get; set; }
+        public string AuthorId { get; set; }
+        public bool Published { get; set; }
+        public DateTime Created { get; set; }
+        public DateTime Updated { get; set; }
+        public DateTime? PublishedAt { get; set; }
+    }
+
+    public class ArticleCreateDto
+    {
+        public string Title { get; set; }
+        public string Content { get; set; }
+    }
+
+    public class ArticleUpdateDto
+    {
+        public string Title { get; set; }
+        public string Content { get; set; }
+    }
+
+    // Service interfaces and implementations
+    public interface IArticleService
+    {
+        Task<IEnumerable<Article>> GetAllArticlesAsync();
+        Task<IEnumerable<Article>> GetVisibleArticlesForUserAsync(string userId);
+        Task<Article> GetArticleByIdAsync(string id);
+        Task CreateArticleAsync(Article article);
+        Task UpdateArticleAsync(Article article);
+        Task DeleteArticleAsync(string id);
+    }
+
+    public class ArticleService : IArticleService
+    {
+        private readonly Dictionary<string, Article> _articles = new Dictionary<string, Article>();
+
+        public Task<IEnumerable<Article>> GetAllArticlesAsync()
+        {
+            return Task.FromResult(_articles.Values.AsEnumerable());
+        }
+
+        public Task<IEnumerable<Article>> GetVisibleArticlesForUserAsync(string userId)
+        {
+            var visibleArticles = _articles.Values
+                .Where(a => a.Published || a.AuthorId == userId)
+                .ToList();
+
+            return Task.FromResult(visibleArticles.AsEnumerable());
+        }
+
+        public Task<Article> GetArticleByIdAsync(string id)
+        {
+            _articles.TryGetValue(id, out var article);
+            return Task.FromResult(article);
+        }
+
+        public Task CreateArticleAsync(Article article)
+        {
+            _articles[article.Id] = article;
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateArticleAsync(Article article)
+        {
+            _articles[article.Id] = article;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteArticleAsync(string id)
+        {
+            _articles.Remove(id);
+            return Task.CompletedTask;
+        }
+    }
+}
+```
+
+### Fail Securely
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Always ensure access control fails securely by defaulting to deny access when errors or exceptions occur. Don't expose sensitive information in error messages."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace SecureApp.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class SecureResourceController : ControllerBase
+    {
+        private readonly IResourceService _resourceService;
+        private readonly IAuthorizationService _authorizationService;
+        private readonly ILogger<SecureResourceController> _logger;
+
+        public SecureResourceController(
+            IResourceService resourceService,
+            IAuthorizationService authorizationService,
+            ILogger<SecureResourceController> logger)
+        {
+            _resourceService = resourceService ?? throw new ArgumentNullException(nameof(resourceService));
+            _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        // SECURE: Default to deny access in case of errors
+        [HttpGet("{id}")]
+        [Authorize]
+        public async Task<IActionResult> GetResource(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return BadRequest("Resource ID is required");
+            }
+
+            try
+            {
+                // Attempt to retrieve the resource
+                var resource = await _resourceService.GetResourceByIdAsync(id);
+
+                // If resource does not exist, return NotFound
+                if (resource == null)
+                {
+                    _logger.LogInformation("Resource not found: {ResourceId}", id);
+                    return NotFound(new { message = "Resource not found" });
+                }
+
+                // Get current user ID
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+                // Evaluate resource-based authorization
+                var authResult = await _authorizationService.AuthorizeAsync(
+                    User, resource, "ResourceAccess");
+
+                // If authorization fails, return forbidden
+                if (!authResult.Succeeded)
+                {
+                    _logger.LogWarning("Access denied for user {UserId} to resource {ResourceId}",
+                        userId, id);
+                    return Forbid();
+                }
+
+                // Access granted, return the resource
+                _logger.LogInformation("User {UserId} accessed resource {ResourceId}", userId, id);
+                return Ok(resource);
+            }
+            catch (Exception ex)
+            {
+                // Log the exception details for troubleshooting
+                _logger.LogError(ex, "Error retrieving resource {ResourceId}", id);
+
+                // IMPORTANT: Default to denying access when exceptions occur
+                // Do not expose exception details to the client
+                return StatusCode(500, new { message = "An error occurred while processing your request" });
+            }
+        }
+
+        // SECURE: Error handling with multiple access control checks
+        [HttpPost("{id}/permissions")]
+        [Authorize]
+        public async Task<IActionResult> UpdatePermissions(string id, [FromBody] UpdatePermissionsDto permissionsDto)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return BadRequest("Resource ID is required");
+            }
+
+            if (permissionsDto == null)
+            {
+                return BadRequest("Permissions data is required");
+            }
+
+            try
+            {
+                // Step 1: Check if user can manage permissions (role-based check)
+                if (!User.IsInRole("Admin") && !User.IsInRole("ResourceManager"))
+                {
+                    _logger.LogWarning("User {UserId} attempted to change permissions without required role",
+                        User.FindFirstValue(ClaimTypes.NameIdentifier));
+                    return Forbid();
+                }
+
+                // Step 2: Retrieve the resource
+                var resource = await _resourceService.GetResourceByIdAsync(id);
+
+                if (resource == null)
+                {
+                    return NotFound(new { message = "Resource not found" });
+                }
+
+                // Step 3: Check if user has ownership or management rights to this specific resource
+                var authResult = await _authorizationService.AuthorizeAsync(
+                    User, resource, "ResourceManagement");
+
+                if (!authResult.Succeeded)
+                {
+                    _logger.LogWarning("User {UserId} has admin role but failed resource-specific permission check for {ResourceId}",
+                        User.FindFirstValue(ClaimTypes.NameIdentifier), id);
+                    return Forbid();
+                }
+
+                // Step 4: Perform the permission update
+                try
+                {
+                    // Update the resource permissions
+                    await _resourceService.UpdatePermissionsAsync(id, permissionsDto.UserPermissions);
+
+                    return Ok(new { message = "Permissions updated successfully" });
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // This is a known business rule violation
+                    _logger.LogWarning(ex, "Business rule violation while updating permissions");
+                    return BadRequest(new { message = "Invalid permission settings" });
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error, log and default to denial
+                    _logger.LogError(ex, "Error updating permissions for resource {ResourceId}", id);
+                    return StatusCode(500, new { message = "Failed to update permissions" });
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log the exception
+                _logger.LogError(ex, "Unhandled error in permission update for resource {ResourceId}", id);
+
+                // Default to secure failure - deny access
+                return StatusCode(500, new { message = "An error occurred while processing your request" });
+            }
+        }
+
+        // SECURE: Global error handler can be applied through middleware
+        // In Startup.cs, add this middleware:
+        /*
+        app.UseExceptionHandler(errorApp =>
+        {
+            errorApp.Run(async context =>
+            {
+                context.Response.StatusCode = 500;
+                context.Response.ContentType = "application/json";
+
+                var exceptionHandlerPathFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+                var exception = exceptionHandlerPathFeature?.Error;
+
+                // Log the exception
+                var logger = context.RequestServices.GetRequiredService<ILogger<Startup>>();
+                logger.LogError(exception, "Unhandled exception");
+
+                // Return a generic error message
+                await context.Response.WriteAsync(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        new { message = "An error occurred while processing your request" }));
+            });
+        });
+        */
+    }
+
+    // Models and interfaces
+    public class Resource
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string OwnerId { get; set; }
+        public string[] AllowedUsers { get; set; }
+    }
+
+    public class UpdatePermissionsDto
+    {
+        public UserPermission[] UserPermissions { get; set; }
+    }
+
+    public class UserPermission
+    {
+        public string UserId { get; set; }
+        public string[] Permissions { get; set; }
+    }
+
+    public interface IResourceService
+    {
+        Task<Resource> GetResourceByIdAsync(string id);
+        Task UpdatePermissionsAsync(string resourceId, UserPermission[] permissions);
+    }
+}
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "client_side_only",
+        "wrong": "Relying solely on client-side access controls (e.g., hiding UI elements, JavaScript checks)",
+        "correct": "Implementing server-side access controls for all sensitive operations and data",
+        "reason": "Client-side controls can be easily bypassed by modifying the client or directly calling APIs"
+    },
+    {
+        "id": "direct_object_references",
+        "wrong": "Using unvalidated direct object references in URLs or parameters",
+        "correct": "Validating that the authenticated user has permission to access the requested resource",
+        "reason": "Attackers can manipulate object identifiers to access unauthorized resources"
+    },
+    {
+        "id": "over_privileged_accounts",
+        "wrong": "Granting users more privileges than needed for their role",
+        "correct": "Following the principle of least privilege, granting only necessary permissions",
+        "reason": "Over-privileged accounts increase the damage potential if an account is compromised"
+    },
+    {
+        "id": "insecure_defaults",
+        "wrong": "Default 'allow' access control settings if a check fails or errors",
+        "correct": "Default 'deny' access control that fails securely",
+        "reason": "Errors or unexpected conditions should never result in unauthorized access"
+    },
+    {
+        "id": "insufficient_logging",
+        "wrong": "Not logging access control failures or unauthorized access attempts",
+        "correct": "Logging all access control decisions, especially failures and suspicious activities",
+        "reason": "Proper logging is essential for detecting attacks and troubleshooting issues"
+    },
+    {
+        "id": "business_logic_bypass",
+        "wrong": "Validating access at the start of a process but not rechecking during multi-step operations",
+        "correct": "Re-validating access control at each step of multi-stage processes",
+        "reason": "Attackers can attempt to bypass controls by manipulating the flow of operations"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Access Control Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Access_Control_Cheat_Sheet.html)
+- [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
+- [OWASP RBAC Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/RBAC_Cheat_Sheet.html)
+- [OWASP Insecure Direct Object Reference Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html)
+- [Microsoft Identity-based authorization in ASP.NET Core](https://docs.microsoft.com/en-us/aspnet/core/security/authorization/introduction)
+- [Policy-based authorization in ASP.NET Core](https://docs.microsoft.com/en-us/aspnet/core/security/authorization/policies)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

@@ -1,0 +1,850 @@
+---
+description: OWASP ASVS Level 1 requirements for input validation and sanitization to prevent injection attacks in .NET applications
+globs: ["**/*.{cs,cshtml,razor}"]
+---
+
+# Input Validation and Sanitization (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V5 - Validation, Sanitization and Encoding",
+    "language": "dotnet"
+}
+
+## Overview
+
+Input validation is the first line of defense against many injection attacks like SQL injection, XSS, command injection, and more.
+Level 1 requirements represent the minimum validation controls necessary for basic application security.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v5.1.1",
+        "severity": "critical",
+        "description": "Use a trusted input validation library for input handling rather than custom validation code",
+        "verification": "Verify that the application has defenses against HTTP parameter pollution attacks"
+    },
+    {
+        "id": "v5.2.1",
+        "severity": "critical",
+        "description": "All untrusted HTML input from WYSIWYG editors or similar is properly sanitized with an HTML sanitizer library or framework feature",
+        "verification": "Verify that all input is validated server-side"
+    },
+    {
+        "id": "v5.3.1",
+        "severity": "critical",
+        "description": "All SQL queries, HQL, OSQL, NoSQL and stored procedures are protected by the use of prepared statements or query parameterization",
+        "verification": "Verify that SQL injection is prevented by using parameterized queries"
+    },
+    {
+        "id": "v5.4.1",
+        "severity": "critical",
+        "description": "File and URL validations prevent path traversal attacks",
+        "verification": "Verify that the application is not vulnerable to path traversal attacks"
+    }
+]
+
+## Implementation Guidelines
+
+### SQL Injection Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Always use parameterized queries or prepared statements. Never concatenate user input directly into SQL strings."
+}
+
+#### ASP.NET Core Example (with Entity Framework Core and ADO.NET)
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace SecureApp.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class UsersController : ControllerBase
+    {
+        private readonly ApplicationDbContext _dbContext;
+        private readonly ILogger<UsersController> _logger;
+        private readonly string _connectionString;
+
+        public UsersController(
+            ApplicationDbContext dbContext,
+            ILogger<UsersController> logger,
+            IConfiguration configuration)
+        {
+            _dbContext = dbContext;
+            _logger = logger;
+            _connectionString = configuration.GetConnectionString("DefaultConnection");
+        }
+
+        // INSECURE: Direct string concatenation
+        [HttpGet("insecure")]
+        public async Task<IActionResult> GetUserInsecure(string userId)
+        {
+            // NEVER DO THIS!
+            string sql = $"SELECT * FROM Users WHERE Id = '{userId}'";  // VULNERABLE!
+            
+            var users = await _dbContext.Users
+                .FromSqlRaw(sql)
+                .ToListAsync();
+
+            return Ok(users);
+        }
+
+        // SECURE: Using Entity Framework Core parameterized queries
+        [HttpGet("secure-ef")]
+        public async Task<IActionResult> GetUserSecureEF(string userId)
+        {
+            // Approach 1: Using strongly-typed LINQ queries
+            var user = await _dbContext.Users
+                .Where(u => u.Id == userId)
+                .FirstOrDefaultAsync();
+
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(user);
+        }
+
+        // SECURE: Using Entity Framework Core SQL with parameters
+        [HttpGet("secure-ef-sql")]
+        public async Task<IActionResult> GetUserSecureEFSql(string userId)
+        {
+            // Approach 2: Using FromSqlRaw with parameters
+            var users = await _dbContext.Users
+                .FromSqlRaw("SELECT * FROM Users WHERE Id = {0}", userId)
+                .ToListAsync();
+
+            if (!users.Any())
+            {
+                return NotFound();
+            }
+
+            return Ok(users.First());
+        }
+
+        // SECURE: Using ADO.NET with parameterized queries
+        [HttpGet("secure-adonet")]
+        public IActionResult GetUserSecureAdoNet(string userId)
+        {
+            var user = new User();
+            
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var command = new SqlCommand("SELECT Id, Username, Email FROM Users WHERE Id = @UserId", connection);
+                
+                // Add parameter safely
+                command.Parameters.Add("@UserId", SqlDbType.NVarChar).Value = userId;
+                
+                connection.Open();
+                
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        user.Id = reader["Id"].ToString();
+                        user.Username = reader["Username"].ToString();
+                        user.Email = reader["Email"].ToString();
+                    }
+                    else
+                    {
+                        return NotFound();
+                    }
+                }
+            }
+            
+            return Ok(user);
+        }
+
+        // SECURE: Using stored procedures
+        [HttpGet("secure-stored-proc")]
+        public IActionResult GetUserStoredProcedure(string userId)
+        {
+            var user = new User();
+            
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var command = new SqlCommand("GetUserById", connection);
+                command.CommandType = CommandType.StoredProcedure;
+                
+                // Add parameter
+                command.Parameters.Add("@UserId", SqlDbType.NVarChar).Value = userId;
+                
+                connection.Open();
+                
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        user.Id = reader["Id"].ToString();
+                        user.Username = reader["Username"].ToString();
+                        user.Email = reader["Email"].ToString();
+                    }
+                    else
+                    {
+                        return NotFound();
+                    }
+                }
+            }
+            
+            return Ok(user);
+        }
+
+        // SECURE: Dapper example (popular micro-ORM)
+        [HttpGet("secure-dapper")]
+        public IActionResult GetUserDapper(string userId)
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                connection.Open();
+                
+                // Dapper parameterized query
+                var user = connection.QueryFirstOrDefault<User>(
+                    "SELECT Id, Username, Email FROM Users WHERE Id = @UserId",
+                    new { UserId = userId }
+                );
+                
+                if (user == null)
+                {
+                    return NotFound();
+                }
+                
+                return Ok(user);
+            }
+        }
+    }
+
+    // Model and context classes
+    public class User
+    {
+        public string Id { get; set; }
+        public string Username { get; set; }
+        public string Email { get; set; }
+    }
+
+    public class ApplicationDbContext : DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
+
+        public DbSet<User> Users { get; set; }
+    }
+    
+    // Extension method for Dapper (simplified)
+    public static class DapperExtensions
+    {
+        public static T QueryFirstOrDefault<T>(this IDbConnection connection, string sql, object param = null)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            
+            // This is a simplified version for the example
+            // The real Dapper implementation is more sophisticated
+            if (param != null)
+            {
+                foreach (var prop in param.GetType().GetProperties())
+                {
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = $"@{prop.Name}";
+                    parameter.Value = prop.GetValue(param) ?? DBNull.Value;
+                    command.Parameters.Add(parameter);
+                }
+            }
+            
+            connection.Open();
+            using var reader = command.ExecuteReader();
+            
+            if (reader.Read())
+            {
+                // Simple implementation for the example
+                var obj = Activator.CreateInstance<T>();
+                
+                foreach (var prop in typeof(T).GetProperties())
+                {
+                    try
+                    {
+                        var value = reader[prop.Name];
+                        if (value != DBNull.Value)
+                        {
+                            prop.SetValue(obj, value);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip properties that don't match columns
+                    }
+                }
+                
+                return obj;
+            }
+            
+            return default;
+        }
+    }
+}
+```
+
+### XSS Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Always encode/escape output data displayed in HTML, JavaScript, CSS, or URLs. Use context-appropriate encoding and consider using a template system with automatic escaping."
+}
+
+#### ASP.NET Core MVC Example
+
+```csharp
+using Microsoft.AspNetCore.Html;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using System;
+using System.Text.Encodings.Web;
+using System.Threading.Tasks;
+using System.Web;
+
+namespace SecureApp.Controllers
+{
+    public class ContentController : Controller
+    {
+        private readonly HtmlEncoder _htmlEncoder;
+        private readonly JavaScriptEncoder _jsEncoder;
+        private readonly UrlEncoder _urlEncoder;
+        private readonly IHtmlSanitizer _htmlSanitizer;
+
+        public ContentController(
+            HtmlEncoder htmlEncoder,
+            JavaScriptEncoder jsEncoder,
+            UrlEncoder urlEncoder,
+            IHtmlSanitizer htmlSanitizer)
+        {
+            _htmlEncoder = htmlEncoder;
+            _jsEncoder = jsEncoder;
+            _urlEncoder = urlEncoder;
+            _htmlSanitizer = htmlSanitizer;
+        }
+
+        // INSECURE: Directly rendering user input in a view
+        [HttpGet("comment/insecure")]
+        public IActionResult CommentInsecure(string comment)
+        {
+            // NEVER DO THIS!
+            // This will be vulnerable to XSS if comment contains HTML/script tags
+            ViewData["UserComment"] = comment;
+            
+            return View();
+        }
+
+        // SECURE: Automatic HTML encoding in Razor views
+        [HttpGet("comment/secure")]
+        public IActionResult CommentSecure(string comment)
+        {
+            // This is safe because Razor automatically HTML-encodes the output
+            // In the view: @Model.Comment
+            return View(new CommentViewModel { Comment = comment });
+        }
+
+        // SECURE: Explicitly encoding HTML in controller
+        [HttpGet("comment/secure-explicit")]
+        public IActionResult CommentSecureExplicit(string comment)
+        {
+            // Explicitly HTML encode the comment
+            var encodedComment = _htmlEncoder.Encode(comment);
+            
+            return Content(encodedComment, "text/plain");
+        }
+
+        // SECURE: Allowing specific HTML with sanitization
+        [HttpGet("comment/secure-sanitized")]
+        public IActionResult CommentSecureSanitized(string comment)
+        {
+            // Allow some HTML tags but sanitize potentially dangerous content
+            var sanitizedComment = _htmlSanitizer.Sanitize(comment);
+            
+            // Mark as safe HTML content that doesn't need encoding
+            var htmlContent = new HtmlString(sanitizedComment);
+            
+            return View(new CommentViewModel { HtmlComment = htmlContent });
+        }
+
+        // SECURE: JavaScript variable encoding
+        [HttpGet("comment/js-encode")]
+        public IActionResult CommentJavaScriptEncoded(string comment)
+        {
+            // Ensure the comment is properly encoded for use in JavaScript
+            ViewData["JsEncodedComment"] = _jsEncoder.Encode(comment);
+            
+            return View();
+        }
+
+        // SECURE: URL encoding
+        [HttpGet("redirect")]
+        public IActionResult RedirectToUrl(string url, string param)
+        {
+            // Ensure the parameter is properly URL encoded
+            var encodedParam = _urlEncoder.Encode(param);
+            
+            // Build URL safely
+            var safeUrl = $"{url}?q={encodedParam}";
+            
+            return Redirect(safeUrl);
+        }
+
+        // SECURE: Content Security Policy implementation
+        [HttpGet("csp-demo")]
+        public IActionResult ContentSecurityPolicyDemo()
+        {
+            // Add Content-Security-Policy header to prevent XSS
+            Response.Headers.Add("Content-Security-Policy",
+                "default-src 'self'; " +
+                "script-src 'self' https://trusted-cdn.com; " +
+                "style-src 'self' https://trusted-cdn.com; " +
+                "img-src 'self' data:; " +
+                "font-src 'self'; " +
+                "connect-src 'self'; " +
+                "media-src 'self'; " +
+                "object-src 'none'; " +
+                "frame-src 'self'; " +
+                "form-action 'self'; " +
+                "frame-ancestors 'self'");
+            
+            return View();
+        }
+    }
+
+    // Razor View Examples:
+    // CommentSecure.cshtml:
+    /*
+    @model CommentViewModel
+    
+    <h1>Your Comment</h1>
+    
+    <div class="comment">
+        @* Safe - Razor automatically HTML encodes model properties *@
+        <p>@Model.Comment</p>
+    </div>
+    */
+
+    // CommentSecureSanitized.cshtml:
+    /*
+    @model CommentViewModel
+    
+    <h1>Your Comment (with allowed HTML)</h1>
+    
+    <div class="comment">
+        @* HtmlComment is pre-sanitized and marked as HtmlString *@
+        @Model.HtmlComment
+    </div>
+    */
+
+    // CommentJavaScriptEncoded.cshtml:
+    /*
+    @{
+        var jsEncodedComment = ViewData["JsEncodedComment"] as string;
+    }
+    
+    <h1>JavaScript Example</h1>
+    
+    <script>
+        // Safe - comment is properly encoded for JavaScript context
+        var userComment = "@jsEncodedComment";
+        console.log("User comment:", userComment);
+    </script>
+    */
+
+    // HTML Sanitizer interface
+    public interface IHtmlSanitizer
+    {
+        string Sanitize(string html);
+    }
+
+    // Example implementation using a third-party library like HtmlSanitizer
+    public class HtmlSanitizerService : IHtmlSanitizer
+    {
+        private readonly Ganss.XSS.HtmlSanitizer _sanitizer;
+
+        public HtmlSanitizerService()
+        {
+            _sanitizer = new Ganss.XSS.HtmlSanitizer();
+            
+            // Configure allowed tags
+            _sanitizer.AllowedTags.Clear();
+            _sanitizer.AllowedTags.Add("b");
+            _sanitizer.AllowedTags.Add("i");
+            _sanitizer.AllowedTags.Add("u");
+            _sanitizer.AllowedTags.Add("em");
+            _sanitizer.AllowedTags.Add("strong");
+            _sanitizer.AllowedTags.Add("p");
+            _sanitizer.AllowedTags.Add("br");
+            _sanitizer.AllowedTags.Add("ul");
+            _sanitizer.AllowedTags.Add("ol");
+            _sanitizer.AllowedTags.Add("li");
+            
+            // Configure allowed attributes
+            _sanitizer.AllowedAttributes.Clear();
+            _sanitizer.AllowedAttributes.Add("class");
+        }
+
+        public string Sanitize(string html)
+        {
+            if (string.IsNullOrEmpty(html))
+            {
+                return string.Empty;
+            }
+            
+            return _sanitizer.Sanitize(html);
+        }
+    }
+
+    public class CommentViewModel
+    {
+        public string Comment { get; set; }
+        public HtmlString HtmlComment { get; set; }
+    }
+}
+```
+
+### Path Traversal Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Validate file paths, normalize paths, and restrict file access to specific directories. Never use user input directly in file operations."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+
+namespace SecureApp.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class FilesController : ControllerBase
+    {
+        private readonly IWebHostEnvironment _environment;
+        private readonly ILogger<FilesController> _logger;
+
+        public FilesController(
+            IWebHostEnvironment environment,
+            ILogger<FilesController> logger)
+        {
+            _environment = environment;
+            _logger = logger;
+        }
+
+        // INSECURE: Directly using user input in file paths
+        [HttpGet("insecure")]
+        public IActionResult GetFileInsecure(string fileName)
+        {
+            // NEVER DO THIS!
+            var filePath = Path.Combine("Resources", fileName); // VULNERABLE to path traversal!
+            
+            if (System.IO.File.Exists(filePath))
+            {
+                var fileContents = System.IO.File.ReadAllText(filePath);
+                return Content(fileContents);
+            }
+            
+            return NotFound();
+        }
+
+        // SECURE: Path validation and normalization
+        [HttpGet("secure")]
+        public IActionResult GetFileSecure(string fileName)
+        {
+            try
+            {
+                // Validate filename (alphanumeric + extension only)
+                if (!IsValidFileName(fileName))
+                {
+                    _logger.LogWarning("Invalid filename attempted: {FileName}", fileName);
+                    return BadRequest("Invalid filename");
+                }
+                
+                // Get the base resources directory (using WebRootPath for publicly accessible files)
+                string baseDirectory = Path.Combine(_environment.WebRootPath, "resources");
+                
+                // Combine paths and resolve to absolute path
+                string filePath = Path.GetFullPath(Path.Combine(baseDirectory, fileName));
+                
+                // Verify the resolved path is within the resources directory
+                if (!filePath.StartsWith(baseDirectory))
+                {
+                    _logger.LogWarning("Path traversal attempt detected: {FilePath}", filePath);
+                    return BadRequest("Invalid file path");
+                }
+                
+                // Check if file exists
+                if (!System.IO.File.Exists(filePath))
+                {
+                    return NotFound();
+                }
+                
+                // Determine content type based on file extension
+                var contentType = GetContentType(Path.GetExtension(fileName));
+                
+                // Read and return file content
+                var fileContents = System.IO.File.ReadAllText(filePath);
+                return Content(fileContents, contentType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error accessing file: {FileName}", fileName);
+                return StatusCode(500, "An error occurred while accessing the file");
+            }
+        }
+
+        // SECURE: File download with additional security checks
+        [HttpGet("download")]
+        public IActionResult DownloadFile(string fileName)
+        {
+            try
+            {
+                // Validate filename
+                if (!IsValidFileName(fileName))
+                {
+                    _logger.LogWarning("Invalid filename attempted: {FileName}", fileName);
+                    return BadRequest("Invalid filename");
+                }
+                
+                // Define allowed file extensions
+                var allowedExtensions = new[] { ".txt", ".pdf", ".docx", ".xlsx", ".csv" };
+                
+                // Get file extension
+                string extension = Path.GetExtension(fileName).ToLowerInvariant();
+                
+                // Check if extension is allowed
+                if (!allowedExtensions.Contains(extension))
+                {
+                    _logger.LogWarning("Invalid file extension attempted: {Extension}", extension);
+                    return BadRequest("File type not allowed");
+                }
+                
+                // Get the base directory for downloads
+                string baseDirectory = Path.Combine(_environment.ContentRootPath, "PrivateFiles");
+                
+                // Combine paths and resolve to absolute path
+                string filePath = Path.GetFullPath(Path.Combine(baseDirectory, fileName));
+                
+                // Verify the resolved path is within the allowed directory
+                if (!filePath.StartsWith(baseDirectory))
+                {
+                    _logger.LogWarning("Path traversal attempt detected: {FilePath}", filePath);
+                    return BadRequest("Invalid file path");
+                }
+                
+                // Check if file exists
+                if (!System.IO.File.Exists(filePath))
+                {
+                    return NotFound();
+                }
+                
+                // Return file
+                return PhysicalFile(filePath, "application/octet-stream", fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error downloading file: {FileName}", fileName);
+                return StatusCode(500, "An error occurred while downloading the file");
+            }
+        }
+
+        // SECURE: File upload with validation
+        [HttpPost("upload")]
+        public async Task<IActionResult> UploadFile()
+        {
+            try
+            {
+                var formFile = Request.Form.Files.FirstOrDefault();
+                if (formFile == null)
+                {
+                    return BadRequest("No file uploaded");
+                }
+                
+                // Validate file size
+                if (formFile.Length > 5 * 1024 * 1024) // 5 MB limit
+                {
+                    return BadRequest("File size exceeds the limit");
+                }
+                
+                // Get original filename and sanitize it
+                var originalFileName = Path.GetFileName(formFile.FileName);
+                var sanitizedFileName = SanitizeFileName(originalFileName);
+                
+                if (string.IsNullOrEmpty(sanitizedFileName))
+                {
+                    return BadRequest("Invalid filename");
+                }
+                
+                // Define allowed file extensions
+                var allowedExtensions = new[] { ".txt", ".pdf", ".docx", ".xlsx", ".csv" };
+                
+                // Get file extension
+                string extension = Path.GetExtension(sanitizedFileName).ToLowerInvariant();
+                
+                // Check if extension is allowed
+                if (!allowedExtensions.Contains(extension))
+                {
+                    _logger.LogWarning("Invalid file extension attempted during upload: {Extension}", extension);
+                    return BadRequest("File type not allowed");
+                }
+                
+                // Generate a unique filename to prevent overwrites
+                var uniqueFileName = $"{Guid.NewGuid()}{extension}";
+                
+                // Get the upload directory
+                var uploadDirectory = Path.Combine(_environment.WebRootPath, "uploads");
+                
+                // Ensure directory exists
+                Directory.CreateDirectory(uploadDirectory);
+                
+                // Create full path
+                var filePath = Path.Combine(uploadDirectory, uniqueFileName);
+                
+                // Save the file
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await formFile.CopyToAsync(stream);
+                }
+                
+                _logger.LogInformation("File uploaded successfully: {OriginalFileName} -> {UniqueFileName}",
+                    sanitizedFileName, uniqueFileName);
+                
+                return Ok(new { FileName = uniqueFileName });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading file");
+                return StatusCode(500, "An error occurred while uploading the file");
+            }
+        }
+
+        // Helper method to validate a filename
+        private bool IsValidFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return false;
+            }
+            
+            // Check if filename matches alphanumeric pattern with extension
+            var regex = new Regex(@"^[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$");
+            return regex.IsMatch(fileName);
+        }
+
+        // Helper method to sanitize a filename
+        private string SanitizeFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return null;
+            }
+            
+            // Remove invalid characters
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var sanitized = new string(fileName
+                .Where(c => !invalidChars.Contains(c))
+                .ToArray());
+            
+            // Limit length
+            if (sanitized.Length > 100)
+            {
+                sanitized = sanitized.Substring(0, 100);
+            }
+            
+            return sanitized;
+        }
+
+        // Helper method to determine content type from file extension
+        private string GetContentType(string extension)
+        {
+            return extension.ToLower() switch
+            {
+                ".txt" => "text/plain",
+                ".html" => "text/html",
+                ".css" => "text/css",
+                ".js" => "application/javascript",
+                ".json" => "application/json",
+                ".xml" => "application/xml",
+                ".pdf" => "application/pdf",
+                ".jpg" => "image/jpeg",
+                ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".gif" => "image/gif",
+                _ => "application/octet-stream"
+            };
+        }
+    }
+}
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "direct_sql_concat",
+        "wrong": "Concatenating user input directly into SQL queries",
+        "correct": "Using parameterized queries with SqlParameter objects or Entity Framework",
+        "reason": "Direct concatenation allows attackers to inject malicious SQL"
+    },
+    {
+        "id": "raw_html_output",
+        "wrong": "Rendering user input directly in HTML responses",
+        "correct": "Relying on Razor's automatic HTML encoding or using HtmlEncoder explicitly",
+        "reason": "Unencoded output enables cross-site scripting (XSS) attacks"
+    },
+    {
+        "id": "unsanitized_file_paths",
+        "wrong": "Using user input directly in file paths without validation",
+        "correct": "Validating filenames, using Path.GetFullPath to normalize, and checking against a base path",
+        "reason": "Can lead to path traversal attacks and unauthorized file access"
+    },
+    {
+        "id": "client_side_only",
+        "wrong": "Relying only on client-side validation",
+        "correct": "Implementing server-side validation using data annotations or validation libraries",
+        "reason": "Client-side validation can be bypassed by attackers using tools like Postman or Burp Suite"
+    },
+    {
+        "id": "use_without_validation",
+        "wrong": "Using Request.Form, Request.QueryString, or Request.Params values without validation",
+        "correct": "Validating all input using model binding with validation attributes or explicit validation",
+        "reason": "Unvalidated input can lead to various injection attacks or application logic flaws"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Input Validation Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
+- [OWASP SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html)
+- [OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+- [OWASP Path Traversal Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Path_Traversal_Cheat_Sheet.html)
+- [Microsoft Input Validation in ASP.NET Core](https://docs.microsoft.com/en-us/aspnet/core/mvc/models/validation)
+- [Microsoft SQL Injection Prevention in ADO.NET](https://docs.microsoft.com/en-us/sql/relational-databases/security/sql-injection)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

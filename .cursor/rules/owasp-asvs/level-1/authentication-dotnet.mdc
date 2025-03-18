@@ -1,0 +1,981 @@
+---
+description: OWASP ASVS Level 1 requirements for secure authentication implementation in .NET applications
+globs: ["**/*.{cs,cshtml,razor}"]
+---
+
+# Authentication Security (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V2 - Authentication",
+    "language": "dotnet"
+}
+
+## Overview
+
+Authentication is a critical security control that verifies that users are who they claim to be. Level 1 authentication requirements focus on the most essential authentication security practices that all applications should implement.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v2.1.1",
+        "severity": "critical",
+        "description": "User passwords must be stored in a secure format using a strong one-way hashing algorithm with salt",
+        "verification": "Verify that passwords are stored with sufficient protection to prevent offline recovery attacks, including brute force and dictionary attacks"
+    },
+    {
+        "id": "v2.2.1",
+        "severity": "critical",
+        "description": "Anti-automation controls must be in place to prevent brute force attacks",
+        "verification": "Verify that anti-automation controls are effective against credential stuffing, brute force, and account lockout attacks"
+    },
+    {
+        "id": "v2.5.1",
+        "severity": "critical",
+        "description": "Credentials and session identifiers must be transmitted only over TLS",
+        "verification": "Verify that credentials are transported via TLS or another strong transport"
+    },
+    {
+        "id": "v2.10.1",
+        "severity": "critical",
+        "description": "Multi-factor authentication should be implemented for sensitive functions",
+        "verification": "Verify that additional authentication is required before sensitive operations"
+    }
+]
+
+## Implementation Guidelines
+
+### Secure Password Storage
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Never store passwords in plain text or using weak hashing algorithms like MD5 or SHA-1. Always use a strong adaptive hashing function specifically designed for passwords, with proper salt."
+}
+
+#### ASP.NET Core Identity Example
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using System;
+using System.Threading.Tasks;
+
+namespace SecureApp
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Add database context
+            services.AddDbContext<ApplicationDbContext>(options =>
+                options.UseSqlServer(Configuration.GetConnectionString("DefaultConnection")));
+
+            // SECURE: Configure ASP.NET Core Identity with secure password hashing
+            services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+            {
+                // Configure password requirements
+                options.Password.RequiredLength = 12; // Minimum 12 characters
+                options.Password.RequireDigit = true;
+                options.Password.RequireNonAlphanumeric = true;
+                options.Password.RequireUppercase = true;
+                options.Password.RequireLowercase = true;
+                
+                // Set lockout settings
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.AllowedForNewUsers = true;
+            })
+            .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddDefaultTokenProviders();
+
+            // Force the password hasher to use a stronger algorithm
+            services.Configure<PasswordHasherOptions>(options =>
+            {
+                // Use the strongest available hashing algorithm
+                options.CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV3;
+                
+                // Increase the iteration count for PBKDF2
+                options.IterationCount = 350000; // Higher than the default
+            });
+
+            // Configure application cookie
+            services.ConfigureApplicationCookie(options =>
+            {
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always; // Require HTTPS
+                options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+                options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
+                options.SlidingExpiration = true;
+            });
+
+            services.AddControllersWithViews();
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                app.UseHsts();
+            }
+
+            app.UseHttpsRedirection();
+            app.UseStaticFiles();
+
+            app.UseRouting();
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+    }
+
+    // Example of manual password hashing if you're not using ASP.NET Core Identity
+    public class PasswordHasher
+    {
+        // INSECURE: Using weak algorithm (SHA-1)
+        public static string HashPasswordInsecure(string password)
+        {
+            // NEVER DO THIS!
+            using (var sha1 = System.Security.Cryptography.SHA1.Create())
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(password);
+                var hash = sha1.ComputeHash(bytes);
+                return Convert.ToBase64String(hash);
+            }
+        }
+
+        // SECURE: Using strong algorithm with salt
+        public static string HashPasswordSecure(string password)
+        {
+            // Use Identity's password hasher, which implements best practices
+            var hasher = new PasswordHasher<object>();
+            return hasher.HashPassword(null, password);
+        }
+
+        // SECURE: Verifying a password
+        public static bool VerifyPassword(string hashedPassword, string providedPassword)
+        {
+            var hasher = new PasswordHasher<object>();
+            var result = hasher.VerifyHashedPassword(null, hashedPassword, providedPassword);
+            
+            return result == PasswordVerificationResult.Success ||
+                   result == PasswordVerificationResult.SuccessRehashNeeded;
+        }
+    }
+
+    // Example registration and login
+    public class AccountController : Microsoft.AspNetCore.Mvc.Controller
+    {
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly SignInManager<ApplicationUser> _signInManager;
+
+        public AccountController(
+            UserManager<ApplicationUser> userManager,
+            SignInManager<ApplicationUser> signInManager)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Register(RegisterViewModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                var user = new ApplicationUser { UserName = model.Email, Email = model.Email };
+                
+                // Identity automatically uses a secure password hashing algorithm
+                var result = await _userManager.CreateAsync(user, model.Password);
+                
+                if (result.Succeeded)
+                {
+                    await _signInManager.SignInAsync(user, isPersistent: false);
+                    return RedirectToAction("Index", "Home");
+                }
+                
+                foreach (var error in result.Errors)
+                {
+                    ModelState.AddModelError(string.Empty, error.Description);
+                }
+            }
+            
+            return View(model);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Login(LoginViewModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                // SignInManager handles failed attempts and account lockout
+                var result = await _signInManager.PasswordSignInAsync(
+                    model.Email,
+                    model.Password,
+                    model.RememberMe,
+                    lockoutOnFailure: true); // Enable lockout on failed attempts
+                
+                if (result.Succeeded)
+                {
+                    return RedirectToAction("Index", "Home");
+                }
+                
+                if (result.IsLockedOut)
+                {
+                    return View("Lockout");
+                }
+                else
+                {
+                    ModelState.AddModelError(string.Empty, "Invalid login attempt.");
+                    return View(model);
+                }
+            }
+            
+            return View(model);
+        }
+    }
+
+    // Required model classes
+    public class ApplicationDbContext : Microsoft.EntityFrameworkCore.DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
+    }
+
+    public class ApplicationUser : IdentityUser
+    {
+        // Additional user properties if needed
+    }
+
+    public class RegisterViewModel
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+        public string ConfirmPassword { get; set; }
+    }
+
+    public class LoginViewModel
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+        public bool RememberMe { get; set; }
+    }
+}
+```
+
+### Brute Force Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Implement rate limiting, account lockout mechanisms, CAPTCHA, or increasing delays to prevent brute force and credential stuffing attacks."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Linq;
+using System.Net;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using AspNetCoreRateLimit;
+using System.Collections.Generic;
+
+namespace SecureApp
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Configure ASP.NET Core Identity for account lockout
+            services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+            {
+                // SECURE: Configure lockout settings
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.AllowedForNewUsers = true;
+            })
+            .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddDefaultTokenProviders();
+
+            // SECURE: Configure rate limiting
+            // Install AspNetCoreRateLimit from NuGet
+            services.AddMemoryCache();
+
+            // Load rate limiting configuration
+            services.Configure<IpRateLimitOptions>(Configuration.GetSection("IpRateLimiting"));
+            services.Configure<IpRateLimitPolicies>(Configuration.GetSection("IpRateLimitPolicies"));
+
+            // Register rate limiting services
+            services.AddSingleton<IIpPolicyStore, MemoryCacheIpPolicyStore>();
+            services.AddSingleton<IRateLimitCounterStore, MemoryCacheRateLimitCounterStore>();
+            services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+            services.AddSingleton<IProcessingStrategy, AsyncKeyLockProcessingStrategy>();
+            services.AddHttpContextAccessor();
+
+            // Register CAPTCHA validation service
+            services.AddTransient<ICaptchaValidator, CaptchaValidator>();
+
+            // Register login attempt tracking service
+            services.AddSingleton<ILoginAttemptTracker, LoginAttemptTracker>();
+
+            services.AddControllersWithViews();
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                app.UseHsts();
+            }
+
+            app.UseHttpsRedirection();
+            app.UseStaticFiles();
+
+            // SECURE: Apply rate limiting middleware
+            app.UseIpRateLimiting();
+
+            app.UseRouting();
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+    }
+
+    // Controller with comprehensive brute force protection
+    public class AccountController : Controller
+    {
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly ILogger<AccountController> _logger;
+        private readonly ICaptchaValidator _captchaValidator;
+        private readonly ILoginAttemptTracker _loginAttemptTracker;
+
+        public AccountController(
+            UserManager<ApplicationUser> userManager,
+            SignInManager<ApplicationUser> signInManager,
+            ILogger<AccountController> logger,
+            ICaptchaValidator captchaValidator,
+            ILoginAttemptTracker loginAttemptTracker)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _logger = logger;
+            _captchaValidator = captchaValidator;
+            _loginAttemptTracker = loginAttemptTracker;
+        }
+
+        // Get login page - show CAPTCHA if too many attempts
+        [HttpGet]
+        public IActionResult Login(string returnUrl = null)
+        {
+            var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            bool requireCaptcha = _loginAttemptTracker.ShouldShowCaptcha(clientIp);
+
+            var model = new LoginViewModel
+            {
+                ReturnUrl = returnUrl,
+                ShowCaptcha = requireCaptcha
+            };
+
+            return View(model);
+        }
+
+        // SECURE: Comprehensive login handling with brute force protection
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            // Check if CAPTCHA is required
+            bool requireCaptcha = _loginAttemptTracker.ShouldShowCaptcha(clientIp);
+            if (requireCaptcha)
+            {
+                model.ShowCaptcha = true;
+
+                // Validate CAPTCHA
+                if (string.IsNullOrEmpty(model.CaptchaResponse) ||
+                    !await _captchaValidator.ValidateAsync(model.CaptchaResponse, clientIp))
+                {
+                    ModelState.AddModelError(string.Empty, "Please complete the CAPTCHA correctly.");
+                    return View(model);
+                }
+            }
+
+            // Get user by email - don't reveal if user exists or not
+            var user = await _userManager.FindByEmailAsync(model.Email);
+            
+            // Record start time for consistent timing
+            var startTime = DateTime.UtcNow;
+
+            if (user != null)
+            {
+                // Check if user is locked out
+                if (await _userManager.IsLockedOutAsync(user))
+                {
+                    _logger.LogWarning("User account locked out: {Email}", model.Email);
+                    
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    ModelState.AddModelError(string.Empty, "Your account has been temporarily locked. Please try again later.");
+                    return View(model);
+                }
+
+                // Attempt to sign in
+                var result = await _signInManager.PasswordSignInAsync(
+                    model.Email,
+                    model.Password,
+                    model.RememberMe,
+                    lockoutOnFailure: true); // Enable lockout on failed attempts
+
+                if (result.Succeeded)
+                {
+                    _logger.LogInformation("User logged in: {Email}", model.Email);
+                    _loginAttemptTracker.ResetAttemptCount(clientIp);
+                    
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    return RedirectToLocal(model.ReturnUrl);
+                }
+
+                if (result.RequiresTwoFactor)
+                {
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    return RedirectToAction(nameof(LoginWith2fa), new { model.ReturnUrl, model.RememberMe });
+                }
+
+                if (result.IsLockedOut)
+                {
+                    _logger.LogWarning("User account locked out: {Email}", model.Email);
+                    
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    return View("Lockout");
+                }
+            }
+
+            // Failed login - increment failed attempts count
+            _loginAttemptTracker.IncrementAttemptCount(clientIp);
+
+            // Apply consistent timing to prevent timing attacks
+            await Task.Delay(GetConsistentDelay(startTime));
+
+            // Return generic error message - don't reveal whether user exists
+            ModelState.AddModelError(string.Empty, "Invalid login attempt.");
+            
+            // Show CAPTCHA if needed for next attempt
+            model.ShowCaptcha = _loginAttemptTracker.ShouldShowCaptcha(clientIp);
+            
+            return View(model);
+        }
+
+        private int GetConsistentDelay(DateTime startTime)
+        {
+            // Aim for a consistent response time of 1 second
+            const int targetResponseTimeMs = 1000;
+            
+            var elapsed = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+            var delayMs = Math.Max(0, targetResponseTimeMs - elapsed);
+            
+            return delayMs;
+        }
+
+        private IActionResult RedirectToLocal(string returnUrl)
+        {
+            if (Url.IsLocalUrl(returnUrl))
+            {
+                return Redirect(returnUrl);
+            }
+            else
+            {
+                return RedirectToAction(nameof(HomeController.Index), "Home");
+            }
+        }
+    }
+
+    // CAPTCHA validator interface
+    public interface ICaptchaValidator
+    {
+        Task<bool> ValidateAsync(string response, string remoteIp);
+    }
+
+    // Example reCAPTCHA validator implementation
+    public class CaptchaValidator : ICaptchaValidator
+    {
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<CaptchaValidator> _logger;
+        private readonly HttpClient _httpClient;
+
+        public CaptchaValidator(
+            IConfiguration configuration,
+            ILogger<CaptchaValidator> logger)
+        {
+            _configuration = configuration;
+            _logger = logger;
+            _httpClient = new HttpClient();
+        }
+
+        public async Task<bool> ValidateAsync(string response, string remoteIp)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(response))
+                {
+                    return false;
+                }
+
+                var content = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("secret", _configuration["ReCaptcha:SecretKey"]),
+                    new KeyValuePair<string, string>("response", response),
+                    new KeyValuePair<string, string>("remoteip", remoteIp)
+                });
+
+                var httpResponse = await _httpClient.PostAsync("https://www.google.com/recaptcha/api/siteverify", content);
+                var responseString = await httpResponse.Content.ReadAsStringAsync();
+                
+                // Parse JSON response
+                var jsonResponse = System.Text.Json.JsonDocument.Parse(responseString);
+                return jsonResponse.RootElement.GetProperty("success").GetBoolean();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating CAPTCHA");
+                return false;
+            }
+        }
+    }
+
+    // Login attempt tracker interface
+    public interface ILoginAttemptTracker
+    {
+        void IncrementAttemptCount(string ipAddress);
+        void ResetAttemptCount(string ipAddress);
+        bool ShouldShowCaptcha(string ipAddress);
+    }
+
+    // Login attempt tracker implementation
+    public class LoginAttemptTracker : ILoginAttemptTracker
+    {
+        private readonly Dictionary<string, (int count, DateTime lastAttempt)> _attempts = new Dictionary<string, (int, DateTime)>();
+        private readonly object _lock = new object();
+        private readonly int _captchaThreshold;
+        private readonly TimeSpan _resetTime;
+
+        public LoginAttemptTracker(IConfiguration configuration)
+        {
+            _captchaThreshold = configuration.GetValue<int>("Security:CaptchaThreshold", 3);
+            _resetTime = TimeSpan.FromMinutes(configuration.GetValue<int>("Security:ResetFailedAttemptsAfterMinutes", 15));
+        }
+
+        public void IncrementAttemptCount(string ipAddress)
+        {
+            if (string.IsNullOrEmpty(ipAddress))
+                return;
+
+            lock (_lock)
+            {
+                if (_attempts.TryGetValue(ipAddress, out var attempt))
+                {
+                    // Increment existing count
+                    _attempts[ipAddress] = (attempt.count + 1, DateTime.UtcNow);
+                }
+                else
+                {
+                    // Add new entry
+                    _attempts[ipAddress] = (1, DateTime.UtcNow);
+                }
+            }
+        }
+
+        public void ResetAttemptCount(string ipAddress)
+        {
+            if (string.IsNullOrEmpty(ipAddress))
+                return;
+
+            lock (_lock)
+            {
+                _attempts.Remove(ipAddress);
+            }
+        }
+
+        public bool ShouldShowCaptcha(string ipAddress)
+        {
+            if (string.IsNullOrEmpty(ipAddress))
+                return false;
+
+            lock (_lock)
+            {
+                if (_attempts.TryGetValue(ipAddress, out var attempt))
+                {
+                    // Reset if last attempt was too long ago
+                    if (DateTime.UtcNow - attempt.lastAttempt > _resetTime)
+                    {
+                        _attempts.Remove(ipAddress);
+                        return false;
+                    }
+
+                    // Show CAPTCHA if attempts exceed threshold
+                    return attempt.count >= _captchaThreshold;
+                }
+
+                return false;
+            }
+        }
+    }
+
+    // View model for login
+    public class LoginViewModel
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+        public bool RememberMe { get; set; }
+        public string ReturnUrl { get; set; }
+        public bool ShowCaptcha { get; set; }
+        public string CaptchaResponse { get; set; }
+    }
+
+    // Database and user classes (stub implementations)
+    public class ApplicationDbContext { }
+    public class ApplicationUser : IdentityUser { }
+    public class HomeController : Controller
+    {
+        public IActionResult Index() => View();
+    }
+}
+```
+
+### Secure Credential Transmission
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Always use HTTPS/TLS for transmitting credentials. Never send credentials in URLs or plain HTTP requests."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpsPolicy;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Http;
+using System;
+
+namespace SecureApp
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddControllersWithViews();
+
+            // SECURE: Configure cookie policy for secure transmission
+            services.Configure<CookiePolicyOptions>(options =>
+            {
+                options.HttpOnly = HttpOnlyPolicy.Always;
+                options.Secure = CookieSecurePolicy.Always; // Require HTTPS
+                options.MinimumSameSitePolicy = SameSiteMode.Strict;
+            });
+
+            // SECURE: Configure HTTPS redirection
+            services.AddHttpsRedirection(options =>
+            {
+                options.RedirectStatusCode = StatusCodes.Status307TemporaryRedirect;
+                options.HttpsPort = 443;
+            });
+
+            // SECURE: Add HSTS (HTTP Strict Transport Security)
+            services.AddHsts(options =>
+            {
+                options.Preload = true;
+                options.IncludeSubDomains = true;
+                options.MaxAge = TimeSpan.FromDays(365);
+            });
+
+            // SECURE: Configure authentication with secure cookie
+            services.AddAuthentication("YourAuthScheme")
+                .AddCookie("YourAuthScheme", options =>
+                {
+                    options.Cookie.Name = "YourAppAuth";
+                    options.Cookie.HttpOnly = true;
+                    options.Cookie.SecurePolicy = CookieSecurePolicy.Always; // Only sent over HTTPS
+                    options.Cookie.SameSite = SameSiteMode.Strict; // Helps prevent CSRF
+                    options.ExpireTimeSpan = TimeSpan.FromHours(1);
+                    options.SlidingExpiration = true;
+                    options.LoginPath = "/Account/Login";
+                    options.AccessDeniedPath = "/Account/AccessDenied";
+                });
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                
+                // SECURE: Add HSTS middleware in production
+                app.UseHsts();
+            }
+
+            // SECURE: Always redirect HTTP to HTTPS
+            app.UseHttpsRedirection();
+            
+            app.UseStaticFiles();
+            app.UseCookiePolicy();
+
+            app.UseRouting();
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+    }
+
+    // SECURE: Login controller with secure credential handling
+    public class AccountController : Microsoft.AspNetCore.Mvc.Controller
+    {
+        // INSECURE: Passing credentials in URL
+        // NEVER DO THIS!
+        [HttpGet]
+        public IActionResult LoginInsecure(string username, string password)
+        {
+            // NEVER transmit credentials in URL parameters!
+            // Authentication logic...
+            return RedirectToAction("Index", "Home");
+        }
+
+        // SECURE: Proper login form submission via POST
+        [HttpGet]
+        public IActionResult Login(string returnUrl = null)
+        {
+            ViewData["ReturnUrl"] = returnUrl;
+            return View();
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken] // Prevent CSRF
+        public IActionResult Login(LoginViewModel model, string returnUrl = null)
+        {
+            ViewData["ReturnUrl"] = returnUrl;
+            
+            if (ModelState.IsValid)
+            {
+                // Authentication logic...
+                
+                // Redirect safely after successful login
+                if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+                {
+                    return Redirect(returnUrl);
+                }
+                else
+                {
+                    return RedirectToAction("Index", "Home");
+                }
+            }
+            
+            // If we got this far, something failed, redisplay form
+            return View(model);
+        }
+    }
+
+    // SECURE: Secure form for credential submission in Razor
+    // Login.cshtml:
+    /*
+    @model LoginViewModel
+    
+    <h2>Log in</h2>
+    
+    <form asp-controller="Account" asp-action="Login" asp-route-returnurl="@ViewData["ReturnUrl"]" method="post">
+        <div asp-validation-summary="All" class="text-danger"></div>
+        
+        <div class="form-group">
+            <label asp-for="Email"></label>
+            <input asp-for="Email" class="form-control" autocomplete="username" />
+            <span asp-validation-for="Email" class="text-danger"></span>
+        </div>
+        
+        <div class="form-group">
+            <label asp-for="Password"></label>
+            <input asp-for="Password" class="form-control" type="password" autocomplete="current-password" />
+            <span asp-validation-for="Password" class="text-danger"></span>
+        </div>
+        
+        <div class="form-group">
+            <div class="checkbox">
+                <label>
+                    <input asp-for="RememberMe" />
+                    @Html.DisplayNameFor(m => m.RememberMe)
+                </label>
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">Log in</button>
+        </div>
+    </form>
+    */
+
+    // Configure secure TLS in web.config for IIS-hosted applications
+    /*
+    <?xml version="1.0" encoding="utf-8"?>
+    <configuration>
+      <system.webServer>
+        <security>
+          <access sslFlags="Ssl, SslNegotiateCert, SslRequireCert" />
+        </security>
+        <rewrite>
+          <rules>
+            <rule name="HTTP to HTTPS redirect" stopProcessing="true">
+              <match url="(.*)" />
+              <conditions>
+                <add input="{HTTPS}" pattern="off" ignoreCase="true" />
+              </conditions>
+              <action type="Redirect" url="https://{HTTP_HOST}/{R:1}" redirectType="Permanent" />
+            </rule>
+          </rules>
+        </rewrite>
+      </system.webServer>
+    </configuration>
+    */
+
+    // Login view model
+    public class LoginViewModel
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+        public bool RememberMe { get; set; }
+    }
+}
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "plaintext_passwords",
+        "wrong": "Storing passwords in plain text or using weak hashing algorithms (MD5, SHA-1)",
+        "correct": "Using strong adaptive hashing algorithms with salt (ASP.NET Core Identity's PBKDF2, BCrypt, Argon2)",
+        "reason": "Plain text or weakly hashed passwords can be easily compromised in a data breach"
+    },
+    {
+        "id": "insecure_transmission",
+        "wrong": "Sending credentials via HTTP or as URL parameters",
+        "correct": "Using HTTPS with POST requests and secure cookies",
+        "reason": "Credentials sent over HTTP or in URLs can be intercepted or leaked in logs"
+    },
+    {
+        "id": "no_brute_force_protection",
+        "wrong": "Having no limits on authentication attempts",
+        "correct": "Implementing rate limiting, account lockout, or increasing delays",
+        "reason": "Without these protections, attackers can perform brute force attacks indefinitely"
+    },
+    {
+        "id": "hardcoded_credentials",
+        "wrong": "Embedding credentials in source code or configuration files",
+        "correct": "Using secure environment variables, Azure Key Vault, or other secrets management services",
+        "reason": "Hardcoded credentials in source code can be discovered through code review or repository access"
+    },
+    {
+        "id": "insecure_cookies",
+        "wrong": "Using cookies without HttpOnly, Secure, and SameSite flags",
+        "correct": "Setting HttpOnly, Secure=true, and SameSite=Strict for authentication cookies",
+        "reason": "Insecure cookies can be stolen via XSS or CSRF attacks"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [ASP.NET Core Security Documentation](https://docs.microsoft.com/en-us/aspnet/core/security)
+- [ASP.NET Core Identity Documentation](https://docs.microsoft.com/en-us/aspnet/core/security/authentication/identity)
+- [Microsoft Security Best Practices for ASP.NET Core](https://docs.microsoft.com/en-us/aspnet/core/security/blazor/server/security-best-practices)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

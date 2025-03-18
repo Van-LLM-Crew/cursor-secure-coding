@@ -1,0 +1,2525 @@
+---
+description: OWASP ASVS Level 2 requirements for advanced input validation and sanitization to prevent injection attacks in .NET applications
+globs: ["**/*.{cs,cshtml,razor}"]
+---
+
+# Advanced Input Validation and Sanitization (ASVS Level 2)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 2,
+    "category": "V5 - Validation, Sanitization and Encoding",
+    "language": "dotnet"
+}
+
+## Overview
+
+Level 2 input validation requirements extend the essential Level 1 controls with more comprehensive validations and protections against sophisticated injection attacks. These controls are important for applications handling sensitive data or business functions.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v5.1.2",
+        "severity": "high",
+        "description": "All structured data is validated against defined schemas using positive validation (allowlist)",
+        "verification": "Verify that input validation routines use a positive (allowlist) approach"
+    },
+    {
+        "id": "v5.1.3",
+        "severity": "high",
+        "description": "URL redirects and forwards only use trusted data and whitelist allowed destinations",
+        "verification": "Verify that URL redirects and forwards only allow destinations which appear on an allowlist"
+    },
+    {
+        "id": "v5.1.4",
+        "severity": "high",
+        "description": "Data from untrusted sources is validated, filtered, or sanitized to be safe for use in OS commands, file operations, or dynamic queries",
+        "verification": "Verify that data selection or database queries (e.g. SQL, HQL, ORM, NoSQL) use parameterized queries, ORMs, entity frameworks, or are otherwise protected from database injection attacks"
+    },
+    {
+        "id": "v5.2.2",
+        "severity": "high",
+        "description": "Unstructured data is sanitized to enforce safety measures such as allowed characters and length",
+        "verification": "Verify that unstructured data is sanitized to enforce safety measures such as allowed characters and length"
+    },
+    {
+        "id": "v5.2.4",
+        "severity": "high",
+        "description": "Data is validated or sanitized before being included in emails, headers, and other contexts",
+        "verification": "Verify that data is validated before being included in mail headers or other contexts"
+    },
+    {
+        "id": "v5.2.6",
+        "severity": "high",
+        "description": "The application protects against JSON injection attacks, CSRF, or inclusion of arbitrary JavaScript",
+        "verification": "Verify that the application protects against JSON injection attacks"
+    },
+    {
+        "id": "v5.3.4",
+        "severity": "high",
+        "description": "The application uses LDAP encoding or query parameterization to protect against LDAP Injection",
+        "verification": "Verify that the application uses LDAP encoding or query parameterization to protect against LDAP Injection"
+    },
+    {
+        "id": "v5.3.5",
+        "severity": "high",
+        "description": "The application uses proper parameterization to avoid OS command injection attacks",
+        "verification": "Verify that the application uses proper parameterization to avoid OS command injection attacks"
+    }
+]
+
+## Implementation Guidelines
+
+### Schema-Based Validation
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Use schema validation libraries to ensure data conforms to expected structures, types, and constraints before processing. Prefer allowlist (positive) validation over blocklist approaches."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Text.RegularExpressions;
+using FluentValidation;
+using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.OpenApi.Models;
+using Newtonsoft.Json.Schema;
+using Newtonsoft.Json.Linq;
+
+namespace SchemaValidationExample
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddControllers()
+                .AddFluentValidation(fv =>
+                {
+                    fv.ImplicitlyValidateChildProperties = true;
+                    fv.RegisterValidatorsFromAssemblyContaining<Startup>();
+                });
+
+            // Add schema validation service
+            services.AddSingleton<ISchemaValidationService, JsonSchemaValidationService>();
+            
+            // Add custom model binding for complex schema validation
+            services.AddScoped<SchemaValidationModelBinder>();
+
+            services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Schema Validation API", Version = "v1" });
+            });
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+                app.UseSwagger();
+                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Schema Validation API v1"));
+            }
+            else
+            {
+                app.UseExceptionHandler("/error");
+                app.UseHsts();
+            }
+
+            app.UseHttpsRedirection();
+            app.UseRouting();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+            });
+        }
+    }
+
+    // Data model with data annotations validation
+    public class Product
+    {
+        [Required(ErrorMessage = "Product ID is required")]
+        [RegularExpression(@"^[a-zA-Z0-9_-]{1,36}$", ErrorMessage = "Product ID can only contain alphanumeric characters, hyphens, and underscores")]
+        public string Id { get; set; }
+
+        [Required(ErrorMessage = "Product name is required")]
+        [StringLength(100, MinimumLength = 1, ErrorMessage = "Product name must be between 1 and 100 characters")]
+        [RegularExpression(@"^[a-zA-Z0-9\s.,_-]+$", ErrorMessage = "Product name contains invalid characters")]
+        public string Name { get; set; }
+
+        [Range(0.01, 10000, ErrorMessage = "Price must be between 0.01 and 10,000")]
+        public decimal Price { get; set; }
+
+        [Required(ErrorMessage = "Category is required")]
+        [StringLength(50, ErrorMessage = "Category name cannot exceed 50 characters")]
+        [AllowedValues("Electronics", "Books", "Clothing", "Food", "Other",
+            ErrorMessage = "Category must be one of the allowed values: Electronics, Books, Clothing, Food, Other")]
+        public string Category { get; set; }
+
+        [MaxLength(10, ErrorMessage = "Maximum 10 tags allowed")]
+        public List<string> Tags { get; set; } = new List<string>();
+
+        [Required(ErrorMessage = "Availability status is required")]
+        public bool InStock { get; set; }
+    }
+
+    // Custom validation attribute for allowed values
+    public class AllowedValuesAttribute : ValidationAttribute
+    {
+        private readonly string[] _allowedValues;
+
+        public AllowedValuesAttribute(params string[] allowedValues)
+        {
+            _allowedValues = allowedValues;
+        }
+
+        protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+        {
+            if (value == null)
+            {
+                return ValidationResult.Success;
+            }
+
+            var stringValue = value.ToString();
+            if (_allowedValues.Contains(stringValue))
+            {
+                return ValidationResult.Success;
+            }
+
+            return new ValidationResult(ErrorMessage ?? $"Value must be one of: {string.Join(", ", _allowedValues)}");
+        }
+    }
+
+    // FluentValidation validator for more complex validation
+    public class ProductValidator : AbstractValidator<Product>
+    {
+        public ProductValidator()
+        {
+            RuleFor(p => p.Id)
+                .NotEmpty().WithMessage("Product ID is required")
+                .Matches(@"^[a-zA-Z0-9_-]{1,36}$").WithMessage("Product ID can only contain alphanumeric characters, hyphens, and underscores");
+
+            RuleFor(p => p.Name)
+                .NotEmpty().WithMessage("Product name is required")
+                .MaximumLength(100).WithMessage("Product name cannot exceed 100 characters")
+                .Matches(@"^[a-zA-Z0-9\s.,_-]+$").WithMessage("Product name contains invalid characters");
+
+            RuleFor(p => p.Price)
+                .GreaterThan(0).WithMessage("Price must be greater than zero")
+                .LessThanOrEqualTo(10000).WithMessage("Price cannot exceed 10,000");
+
+            RuleFor(p => p.Category)
+                .NotEmpty().WithMessage("Category is required")
+                .MaximumLength(50).WithMessage("Category name cannot exceed 50 characters")
+                .Must(c => new[] { "Electronics", "Books", "Clothing", "Food", "Other" }.Contains(c))
+                .WithMessage("Category must be one of the allowed values: Electronics, Books, Clothing, Food, Other");
+
+            RuleForEach(p => p.Tags)
+                .NotEmpty().WithMessage("Tag cannot be empty")
+                .Matches(@"^[a-zA-Z0-9_-]+$").WithMessage("Tags can only contain alphanumeric characters, hyphens, and underscores");
+
+            RuleFor(p => p.Tags)
+                .Must(t => t == null || t.Count <= 10)
+                .WithMessage("Maximum 10 tags allowed");
+        }
+    }
+
+    // JSON Schema validation service
+    public interface ISchemaValidationService
+    {
+        (bool isValid, IList<string> errors) ValidateAgainstSchema(string jsonData, string schemaName);
+        void RegisterSchema(string schemaName, string jsonSchema);
+    }
+
+    public class JsonSchemaValidationService : ISchemaValidationService
+    {
+        private readonly Dictionary<string, JSchema> _schemas = new Dictionary<string, JSchema>();
+        private readonly ILogger<JsonSchemaValidationService> _logger;
+
+        public JsonSchemaValidationService(ILogger<JsonSchemaValidationService> logger)
+        {
+            _logger = logger;
+            
+            // Register built-in schemas
+            RegisterProductSchema();
+        }
+
+        private void RegisterProductSchema()
+        {
+            const string productSchema = @"{
+                'type': 'object',
+                'required': ['id', 'name', 'category'],
+                'properties': {
+                    'id': {
+                        'type': 'string',
+                        'pattern': '^[a-zA-Z0-9_-]{1,36}$'
+                    },
+                    'name': {
+                        'type': 'string',
+                        'minLength': 1,
+                        'maxLength': 100,
+                        'pattern': '^[a-zA-Z0-9\\s.,_-]+$'
+                    },
+                    'price': {
+                        'type': 'number',
+                        'minimum': 0.01,
+                        'maximum': 10000
+                    },
+                    'category': {
+                        'type': 'string',
+                        'enum': ['Electronics', 'Books', 'Clothing', 'Food', 'Other']
+                    },
+                    'tags': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                            'pattern': '^[a-zA-Z0-9_-]+$'
+                        },
+                        'maxItems': 10
+                    },
+                    'inStock': {
+                        'type': 'boolean'
+                    }
+                },
+                'additionalProperties': false
+            }";
+
+            RegisterSchema("product", productSchema);
+        }
+
+        public void RegisterSchema(string schemaName, string jsonSchema)
+        {
+            try
+            {
+                var schema = JSchema.Parse(jsonSchema);
+                _schemas[schemaName] = schema;
+                _logger.LogInformation($"Schema '{schemaName}' registered successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to register schema '{schemaName}'");
+                throw;
+            }
+        }
+
+        public (bool isValid, IList<string> errors) ValidateAgainstSchema(string jsonData, string schemaName)
+        {
+            if (!_schemas.TryGetValue(schemaName, out var schema))
+            {
+                throw new ArgumentException($"Schema '{schemaName}' is not registered", nameof(schemaName));
+            }
+
+            try
+            {
+                var jsonObject = JToken.Parse(jsonData);
+                
+                var errorMessages = new List<string>();
+                bool isValid = jsonObject.IsValid(schema, out IList<string> errors);
+                
+                if (!isValid && errors != null)
+                {
+                    errorMessages.AddRange(errors);
+                }
+                
+                return (isValid, errorMessages);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "JSON validation error");
+                return (false, new List<string> { "Invalid JSON format" });
+            }
+        }
+    }
+
+    // Custom model binding for schema validation
+    public class SchemaValidationModelBinder : IModelBinder
+    {
+        private readonly ISchemaValidationService _schemaValidationService;
+        private readonly ILogger<SchemaValidationModelBinder> _logger;
+
+        public SchemaValidationModelBinder(
+            ISchemaValidationService schemaValidationService,
+            ILogger<SchemaValidationModelBinder> logger)
+        {
+            _schemaValidationService = schemaValidationService;
+            _logger = logger;
+        }
+
+        public async Task BindModelAsync(ModelBindingContext bindingContext)
+        {
+            if (bindingContext == null)
+            {
+                throw new ArgumentNullException(nameof(bindingContext));
+            }
+
+            // Get the JSON data from the request
+            using (var reader = new StreamReader(bindingContext.HttpContext.Request.Body))
+            {
+                var jsonData = await reader.ReadToEndAsync();
+                if (string.IsNullOrEmpty(jsonData))
+                {
+                    bindingContext.Result = ModelBindingResult.Failed();
+                    return;
+                }
+
+                // Get the schema name from a route value or query parameter
+                var schemaName = bindingContext.ActionContext.RouteData.Values["schemaName"]?.ToString() ?? "product";
+
+                // Validate the JSON against the schema
+                var (isValid, errors) = _schemaValidationService.ValidateAgainstSchema(jsonData, schemaName);
+                if (!isValid)
+                {
+                    foreach (var error in errors)
+                    {
+                        bindingContext.ModelState.AddModelError(string.Empty, error);
+                    }
+                    bindingContext.Result = ModelBindingResult.Failed();
+                    return;
+                }
+
+                // Deserialize the JSON to the model type
+                var model = JsonConvert.DeserializeObject(jsonData, bindingContext.ModelType);
+                bindingContext.Result = ModelBindingResult.Success(model);
+            }
+        }
+    }
+
+    // Controller using the validators
+    [ApiController]
+    [Route("api/[controller]")]
+    public class ProductsController : ControllerBase
+    {
+        private readonly ISchemaValidationService _schemaValidationService;
+        private readonly ILogger<ProductsController> _logger;
+
+        public ProductsController(
+            ISchemaValidationService schemaValidationService,
+            ILogger<ProductsController> logger)
+        {
+            _schemaValidationService = schemaValidationService;
+            _logger = logger;
+        }
+
+        // Using ASP.NET Core's built-in model validation with data annotations
+        [HttpPost("validate/annotations")]
+        public IActionResult ValidateWithAnnotations([FromBody] Product product)
+        {
+            // ModelState validation is automatically performed due to [ApiController]
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // Additional validation logic if needed
+            if (product.Tags != null && product.Tags.Any(t => t.Length > 20))
+            {
+                return BadRequest("Each tag must be 20 characters or less");
+            }
+
+            // Process the validated product
+            _logger.LogInformation($"Product validated: {product.Id}");
+            
+            return Ok(new { message = "Product validated successfully", product });
+        }
+
+        // Using FluentValidation (note: FluentValidation is automatically integrated due to AddFluentValidation)
+        [HttpPost("validate/fluent")]
+        public IActionResult ValidateWithFluentValidation([FromBody] Product product)
+        {
+            // FluentValidation is automatically triggered due to AddFluentValidation
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // Process the validated product
+            _logger.LogInformation($"Product validated with FluentValidation: {product.Id}");
+            
+            return Ok(new { message = "Product validated successfully", product });
+        }
+
+        // Using JSON Schema validation
+        [HttpPost("validate/schema")]
+        public IActionResult ValidateWithJsonSchema([FromBody] string jsonData)
+        {
+            if (string.IsNullOrEmpty(jsonData))
+            {
+                return BadRequest("No data provided");
+            }
+
+            var (isValid, errors) = _schemaValidationService.ValidateAgainstSchema(jsonData, "product");
+            if (!isValid)
+            {
+                return BadRequest(new { errors });
+            }
+
+            // Deserialize and process the validated product
+            var product = JsonConvert.DeserializeObject<Product>(jsonData);
+            _logger.LogInformation($"Product validated with JSON Schema: {product.Id}");
+            
+            return Ok(new { message = "Product validated successfully", product });
+        }
+
+        // Using custom model binding for schema validation
+        [HttpPost("validate/custom/{schemaName}")]
+        public IActionResult ValidateWithCustomBinding([ModelBinder(typeof(SchemaValidationModelBinder))] Product product, string schemaName)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // Process the validated product
+            _logger.LogInformation($"Product validated with custom binding against schema '{schemaName}': {product.Id}");
+            
+            return Ok(new { message = $"Product validated successfully against schema '{schemaName}'", product });
+        }
+    }
+}
+```
+
+### Safe URL Redirects and Forwards
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Validate all redirect URLs against an allowlist of permitted destinations. Avoid passing user-controlled data directly to redirect functions."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace SecureRedirectExample
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class RedirectController : ControllerBase
+    {
+        private readonly ILogger<RedirectController> _logger;
+        private readonly IRedirectValidationService _redirectValidationService;
+
+        public RedirectController(
+            ILogger<RedirectController> logger,
+            IRedirectValidationService redirectValidationService)
+        {
+            _logger = logger;
+            _redirectValidationService = redirectValidationService;
+        }
+
+        // INSECURE: Direct use of user-supplied URL
+        [HttpGet("insecure")]
+        public IActionResult RedirectInsecure([FromQuery] string url)
+        {
+            // NEVER DO THIS!
+            return Redirect(url); // Vulnerable to open redirect attacks
+        }
+
+        // INSECURE: Partial validation (insufficient)
+        [HttpGet("partial")]
+        public IActionResult RedirectPartialValidation([FromQuery] string url)
+        {
+            // STILL INSECURE - can be bypassed
+            if (url?.Contains("example.com") == true)
+            {
+                // This can be bypassed with URLs like "https://evil.com?q=https://example.com"
+                return Redirect(url);
+            }
+
+            // Default redirect
+            return Redirect("/");
+        }
+
+        // SECURE: Using an allowlist of permitted domains
+        [HttpGet("secure")]
+        public IActionResult RedirectSecure([FromQuery] string url)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+                return Redirect("/");
+            }
+
+            bool isValidRedirect = _redirectValidationService.IsValidRedirectUrl(url);
+
+            if (isValidRedirect)
+            {
+                _logger.LogInformation("Redirecting to allowed URL: {Url}", url);
+                return Redirect(url);
+            }
+            else
+            {
+                _logger.LogWarning("Blocked redirect to non-allowlisted URL: {Url}", url);
+                return Redirect("/");
+            }
+        }
+
+        // SECURE: Using a map of allowed redirect keys to URLs
+        [HttpGet("key")]
+        public IActionResult RedirectWithKeyMapping([FromQuery] string to)
+        {
+            if (string.IsNullOrEmpty(to))
+            {
+                return Redirect("/");
+            }
+
+            string destination = _redirectValidationService.GetMappedUrl(to);
+
+            if (!string.IsNullOrEmpty(destination))
+            {
+                _logger.LogInformation("Redirecting to key-mapped URL: {Key} -> {Url}", to, destination);
+                return Redirect(destination);
+            }
+            else
+            {
+                _logger.LogWarning("Invalid redirect key attempted: {Key}", to);
+                return Redirect("/");
+            }
+        }
+
+        // SECURE: Adding path and query parameters to a fixed domain
+        [HttpGet("params")]
+        public IActionResult RedirectWithSafeParams([FromQuery] string path, [FromQuery] string query)
+        {
+            // Validate path parameter (only allow specific paths)
+            if (string.IsNullOrEmpty(path) || !_redirectValidationService.IsValidPath(path))
+            {
+                _logger.LogWarning("Invalid redirect path attempted: {Path}", path);
+                return Redirect("/");
+            }
+
+            // Build the URL with the trusted domain and validated path
+            var url = $"https://example.com/{path}";
+
+            // If query parameters are provided, validate and append them
+            if (!string.IsNullOrEmpty(query) && _redirectValidationService.IsValidQueryString(query))
+            {
+                url += $"?{query}";
+            }
+
+            _logger.LogInformation("Redirecting to built URL: {Url}", url);
+            return Redirect(url);
+        }
+
+        // SECURE: Creating signed URLs for redirects with tampering protection
+        [HttpGet("signed")]
+        public IActionResult CreateSignedRedirect([FromQuery] string path, [FromQuery] string query)
+        {
+            // Validate path
+            if (string.IsNullOrEmpty(path) || !_redirectValidationService.IsValidPath(path))
+            {
+                return BadRequest("Invalid path specified");
+            }
+
+            // Create a signed URL that will be valid for redirection
+            string signedUrl = _redirectValidationService.CreateSignedUrl(path, query);
+
+            return Ok(new { redirectUrl = $"/api/redirect/verify?token={signedUrl}" });
+        }
+
+        // SECURE: Verify and process signed redirect URLs
+        [HttpGet("verify")]
+        public IActionResult VerifySignedRedirect([FromQuery] string token)
+        {
+            if (string.IsNullOrEmpty(token))
+            {
+                return BadRequest("No redirect token provided");
+            }
+
+            try
+            {
+                bool isValid = _redirectValidationService.VerifySignedUrl(token, out string validatedUrl);
+
+                if (isValid && !string.IsNullOrEmpty(validatedUrl))
+                {
+                    _logger.LogInformation("Redirecting to verified signed URL: {Url}", validatedUrl);
+                    return Redirect(validatedUrl);
+                }
+                else
+                {
+                    _logger.LogWarning("Invalid signed URL token: {Token}", token);
+                    return Redirect("/");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error verifying signed URL token");
+                return Redirect("/");
+            }
+        }
+
+        // SECURE: LocalRedirect for handling internal redirects
+        [HttpGet("local")]
+        public IActionResult LocalRedirectExample([FromQuery] string returnUrl)
+        {
+            // Only allow local URLs (same website)
+            // LocalRedirect will throw an exception if the URL is not local
+            try
+            {
+                if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+                {
+                    _logger.LogInformation("Local redirect to: {Url}", returnUrl);
+                    return LocalRedirect(returnUrl);
+                }
+                else
+                {
+                    _logger.LogWarning("Non-local URL rejected: {Url}", returnUrl);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in local redirect");
+            }
+
+            return Redirect("/");
+        }
+    }
+
+    // Service for validating redirects
+    public interface IRedirectValidationService
+    {
+        bool IsValidRedirectUrl(string url);
+        string GetMappedUrl(string key);
+        bool IsValidPath(string path);
+        bool IsValidQueryString(string query);
+        string CreateSignedUrl(string path, string query = null);
+        bool VerifySignedUrl(string token, out string validatedUrl);
+    }
+
+    public class RedirectValidationService : IRedirectValidationService
+    {
+        private readonly ILogger<RedirectValidationService> _logger;
+        private readonly HashSet<string> _allowedDomains;
+        private readonly Dictionary<string, string> _urlMap;
+        private readonly string _signingKey;
+
+        public RedirectValidationService(ILogger<RedirectValidationService> logger)
+        {
+            _logger = logger;
+            
+            // Initialize allowed domains
+            _allowedDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "example.com",
+                "www.example.com",
+                "api.example.com",
+                "trusted-partner.com",
+                "www.trusted-partner.com"
+            };
+            
+            // Initialize URL mapping
+            _urlMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["home"] = "/",
+                ["login"] = "/account/login",
+                ["register"] = "/account/register",
+                ["profile"] = "/account/profile",
+                ["dashboard"] = "/dashboard",
+                ["help"] = "https://help.example.com",
+                ["partner"] = "https://trusted-partner.com/portal"
+            };
+            
+            // In a real application, this would be securely stored in configuration
+            _signingKey = "ApplicationSpecificSigningKey-2394872345";
+        }
+
+        public bool IsValidRedirectUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+                return false;
+            }
+
+            try
+            {
+                // Handle relative URLs
+                if (url.StartsWith("/"))
+                {
+                    // Internal URLs are always allowed
+                    return true;
+                }
+
+                // Parse the URL to extract the domain
+                Uri uri = new Uri(url);
+                string host = uri.Host.ToLowerInvariant();
+
+                // Check if the host is in the allowlist
+                bool isAllowed = _allowedDomains.Contains(host);
+
+                // Additional checks can be performed here if needed
+                // For example, ensure HTTPS for external redirects
+                if (isAllowed && !uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Blocked non-HTTPS redirect to allowed domain: {Url}", url);
+                    return false;
+                }
+
+                return isAllowed;
+            }
+            catch (UriFormatException ex)
+            {
+                _logger.LogWarning(ex, "Invalid URL format: {Url}", url);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating redirect URL: {Url}", url);
+                return false;
+            }
+        }
+
+        public string GetMappedUrl(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                return null;
+            }
+
+            return _urlMap.TryGetValue(key, out string url) ? url : null;
+        }
+
+        public bool IsValidPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+
+            // Sanitize path: remove leading/trailing slashes and normalize
+            path = path.Trim('/');
+
+            // Allow only alphanumeric characters, slashes, hyphens, and underscores
+            if (!Regex.IsMatch(path, @"^[a-zA-Z0-9/\-_]+$"))
+            {
+                return false;
+            }
+
+            // Disallow path traversal attempts
+            if (path.Contains(".."))
+            {
+                return false;
+            }
+
+            // Allowlist of valid paths
+            var allowedPaths = new[]
+            {
+                "products",
+                "products/category",
+                "services",
+                "about",
+                "contact",
+                "blog",
+                "faq"
+            };
+
+            // Check if the path or a parent path is in the allowlist
+            return allowedPaths.Any(p => path == p || path.StartsWith(p + "/"));
+        }
+
+        public bool IsValidQueryString(string query)
+        {
+            if (string.IsNullOrEmpty(query))
+            {
+                return true; // Empty query is valid
+            }
+
+            // Disallow certain dangerous characters
+            if (query.Contains("<") || query.Contains(">") || query.Contains(";") ||
+                query.Contains("'") || query.Contains("\"") || query.Contains("\\"))
+            {
+                return false;
+            }
+
+            // Validate query string format
+            try
+            {
+                // Split into key-value pairs and validate each
+                var pairs = query.Split('&');
+                foreach (var pair in pairs)
+                {
+                    var parts = pair.Split('=');
+                    if (parts.Length != 2)
+                    {
+                        return false;
+                    }
+
+                    var key = Uri.UnescapeDataString(parts[0]);
+                    var value = Uri.UnescapeDataString(parts[1]);
+
+                    // Check for empty keys
+                    if (string.IsNullOrEmpty(key))
+                    {
+                        return false;
+                    }
+
+                    // Check for allowed parameters
+                    var allowedParams = new[] { "id", "category", "page", "sort", "filter", "q", "ref" };
+                    if (!allowedParams.Contains(key))
+                    {
+                        return false;
+                    }
+
+                    // Additional parameter-specific validation can be implemented here
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Invalid query string: {Query}", query);
+                return false;
+            }
+        }
+
+        public string CreateSignedUrl(string path, string query = null)
+        {
+            // Create a URL from the path and query
+            string url = path;
+            if (!string.IsNullOrEmpty(query))
+            {
+                url += $"?{query}";
+            }
+
+            // Add a timestamp to prevent indefinite use
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 300; // Valid for 5 minutes
+            string dataToSign = $"{url}|{timestamp}";
+
+            // Create a signature
+            string signature = ComputeSignature(dataToSign);
+
+            // Combine the URL, timestamp, and signature
+            string token = Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes($"{url}|{timestamp}|{signature}"));
+
+            return token;
+        }
+
+        public bool VerifySignedUrl(string token, out string validatedUrl)
+        {
+            validatedUrl = null;
+
+            try
+            {
+                // Decode the token
+                string decodedToken = System.Text.Encoding.UTF8.GetString(
+                    Convert.FromBase64String(token));
+
+                // Split into components
+                string[] parts = decodedToken.Split('|');
+                if (parts.Length != 3)
+                {
+                    return false;
+                }
+
+                string url = parts[0];
+                long timestamp = long.Parse(parts[1]);
+                string providedSignature = parts[2];
+
+                // Check if the token has expired
+                long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (timestamp < currentTime)
+                {
+                    _logger.LogWarning("Expired signed URL token");
+                    return false;
+                }
+
+                // Compute and verify the signature
+                string dataToSign = $"{url}|{timestamp}";
+                string computedSignature = ComputeSignature(dataToSign);
+
+                if (providedSignature != computedSignature)
+                {
+                    _logger.LogWarning("Invalid signature for signed URL");
+                    return false;
+                }
+
+                // Validate the URL again for extra security
+                // Extract path and query
+                string path = url;
+                string query = null;
+
+                int queryIndex = url.IndexOf('?');
+                if (queryIndex >= 0)
+                {
+                    path = url.Substring(0, queryIndex);
+                    query = url.Substring(queryIndex + 1);
+                }
+
+                if (!IsValidPath(path))
+                {
+                    _logger.LogWarning("Invalid path in signed URL: {Path}", path);
+                    return false;
+                }
+
+                if (query != null && !IsValidQueryString(query))
+                {
+                    _logger.LogWarning("Invalid query string in signed URL: {Query}", query);
+                    return false;
+                }
+
+                // URL is valid and signature matches
+                validatedUrl = url.StartsWith("/") ? url : $"/{url}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error verifying signed URL token");
+                return false;
+            }
+        }
+
+        private string ComputeSignature(string data)
+        {
+            using (var hmac = new System.Security.Cryptography.HMACSHA256(
+                System.Text.Encoding.UTF8.GetBytes(_signingKey)))
+            {
+                byte[] hashBytes = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+                return Convert.ToBase64String(hashBytes);
+            }
+        }
+    }
+}
+```
+
+### Command Injection Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Never use untrusted input in system commands. Use secure APIs that don't invoke shells, validate all inputs thoroughly, and consider safer alternatives to executing external commands."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+namespace SecureCommandExecution
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class SystemCommandsController : ControllerBase
+    {
+        private readonly ICommandExecutionService _commandService;
+        private readonly ILogger<SystemCommandsController> _logger;
+
+        public SystemCommandsController(
+            ICommandExecutionService commandService,
+            ILogger<SystemCommandsController> logger)
+        {
+            _commandService = commandService;
+            _logger = logger;
+        }
+
+        // INSECURE: Direct use of user input in command
+        [HttpGet("insecure")]
+        public IActionResult RunCommandInsecure([FromQuery] string input)
+        {
+            // NEVER DO THIS!
+            try
+            {
+                var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "cmd.exe", // or "/bin/bash" on Linux/macOS
+                        Arguments = $"/c grep \"{input}\" C:\\logs\\app.log", // VULNERABLE!
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+
+                process.Start();
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit();
+
+                return Ok(new { output });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // SECURE: Using safe command execution service
+        [HttpGet("secure")]
+        public async Task<IActionResult> RunCommandSecure([FromQuery] string searchTerm)
+        {
+            if (string.IsNullOrEmpty(searchTerm))
+            {
+                return BadRequest("Search term is required");
+            }
+
+            try
+            {
+                CommandResult result = await _commandService.SearchLogsAsync(searchTerm);
+
+                if (result.Success)
+                {
+                    return Ok(new { output = result.Output });
+                }
+                else
+                {
+                    _logger.LogWarning("Command execution failed: {Error}", result.Error);
+                    return StatusCode(500, new { error = "Failed to search logs" });
+                }
+            }
+            catch (ValidationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in command execution");
+                return StatusCode(500, new { error = "An unexpected error occurred" });
+            }
+        }
+
+        // SECURE: Using safe file search implementation without executing external commands
+        [HttpGet("file-search")]
+        public async Task<IActionResult> SearchFileDirectly([FromQuery] string searchTerm)
+        {
+            if (string.IsNullOrEmpty(searchTerm))
+            {
+                return BadRequest("Search term is required");
+            }
+
+            try
+            {
+                string[] results = await _commandService.SearchFileDirectlyAsync(searchTerm);
+                return Ok(new { matches = results });
+            }
+            catch (ValidationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (FileNotFoundException)
+            {
+                return NotFound(new { error = "Log file not found" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching file");
+                return StatusCode(500, new { error = "An error occurred while searching the file" });
+            }
+        }
+
+        // Example of executing a whitelisted command with safe parameters
+        [HttpGet("ping")]
+        public async Task<IActionResult> PingHost([FromQuery] string host)
+        {
+            if (string.IsNullOrEmpty(host))
+            {
+                return BadRequest("Host parameter is required");
+            }
+
+            try
+            {
+                // This only allows executing the ping command with specific parameters
+                CommandResult result = await _commandService.PingHostAsync(host);
+
+                if (result.Success)
+                {
+                    return Ok(new { output = result.Output });
+                }
+                else
+                {
+                    return BadRequest(new { error = result.Error });
+                }
+            }
+            catch (ValidationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error pinging host");
+                return StatusCode(500, new { error = "An error occurred while pinging the host" });
+            }
+        }
+    }
+
+    // Command execution service interface
+    public interface ICommandExecutionService
+    {
+        Task<CommandResult> SearchLogsAsync(string searchTerm);
+        Task<string[]> SearchFileDirectlyAsync(string searchTerm);
+        Task<CommandResult> PingHostAsync(string host);
+    }
+
+    // Command result model
+    public class CommandResult
+    {
+        public bool Success { get; set; }
+        public string Output { get; set; }
+        public string Error { get; set; }
+        public int ExitCode { get; set; }
+    }
+
+    // Custom validation exception
+    public class ValidationException : Exception
+    {
+        public ValidationException(string message) : base(message) { }
+    }
+
+    // Safe command execution service implementation
+    public class CommandExecutionService : ICommandExecutionService
+    {
+        private readonly ILogger<CommandExecutionService> _logger;
+        private readonly string _logFilePath;
+
+        public CommandExecutionService(ILogger<CommandExecutionService> logger)
+        {
+            _logger = logger;
+            
+            // In a real application, get this from configuration
+            _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "app.log");
+        }
+
+        public async Task<CommandResult> SearchLogsAsync(string searchTerm)
+        {
+            // Validate input
+            ValidateSearchTerm(searchTerm);
+
+            // Create the result object
+            var result = new CommandResult
+            {
+                Success = false,
+                Output = string.Empty,
+                Error = string.Empty,
+                ExitCode = -1
+            };
+
+            // We'll use the built-in Process class but with strict security controls
+            using (var process = new Process())
+            {
+                // Configure ProcessStartInfo with secure settings
+                process.StartInfo = new ProcessStartInfo
+                {
+                    // Notice we directly use the executable, not a shell like cmd.exe or bash
+                    FileName = Environment.OSVersion.Platform == PlatformID.Win32NT ? "findstr.exe" : "grep",
+                    
+                    // Add search term as an argument, not part of a shell command
+                    Arguments = FormatCommandArguments(searchTerm),
+                    
+                    // Configure process to capture output and not use shell
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    
+                    // Set explicit working directory
+                    WorkingDirectory = Path.GetDirectoryName(_logFilePath)
+                };
+
+                // Time limit for command execution
+                var timeoutMs = 5000; // 5 seconds
+                
+                try
+                {
+                    // Start the process
+                    process.Start();
+                    
+                    // Read output and error streams asynchronously
+                    var outputTask = process.StandardOutput.ReadToEndAsync();
+                    var errorTask = process.StandardError.ReadToEndAsync();
+                    
+                    // Wait for process to exit with timeout
+                    bool exitedInTime = await Task.Run(() => process.WaitForExit(timeoutMs));
+                    
+                    if (!exitedInTime)
+                    {
+                        process.Kill();
+                        result.Error = "Command execution timed out";
+                        _logger.LogWarning("Command timed out while searching logs for term: {SearchTerm}", searchTerm);
+                        return result;
+                    }
+                    
+                    // Get output and error
+                    result.Output = await outputTask;
+                    result.Error = await errorTask;
+                    result.ExitCode = process.ExitCode;
+                    result.Success = process.ExitCode == 0 || process.ExitCode == 1; // grep returns 1 if no matches
+                    
+                    if (!string.IsNullOrEmpty(result.Error) && !result.Success)
+                    {
+                        _logger.LogWarning("Command error: {Error}", result.Error);
+                    }
+                    
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error executing search command for term: {SearchTerm}", searchTerm);
+                    result.Error = "Error executing command";
+                    return result;
+                }
+            }
+        }
+
+        public async Task<string[]> SearchFileDirectlyAsync(string searchTerm)
+        {
+            // Validate input
+            ValidateSearchTerm(searchTerm);
+
+            // Ensure file exists
+            if (!System.IO.File.Exists(_logFilePath))
+            {
+                throw new FileNotFoundException("Log file not found", _logFilePath);
+            }
+
+            var matches = new List<string>();
+
+            // Read and search the file line by line
+            using (var fileStream = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(fileStream))
+            {
+                string line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    if (line.Contains(searchTerm))
+                    {
+                        matches.Add(line);
+                    }
+                }
+            }
+
+            return matches.ToArray();
+        }
+
+        public async Task<CommandResult> PingHostAsync(string host)
+        {
+            // Validate host input
+            ValidateHostname(host);
+
+            var result = new CommandResult
+            {
+                Success = false,
+                Output = string.Empty,
+                Error = string.Empty,
+                ExitCode = -1
+            };
+
+            using (var process = new Process())
+            {
+                // Configure ProcessStartInfo with secure settings for ping
+                process.StartInfo = new ProcessStartInfo
+                {
+                    FileName = "ping",
+                    // Ping specific arguments vary by OS
+                    Arguments = Environment.OSVersion.Platform == PlatformID.Win32NT
+                        ? $"-n 4 -w 1000 {host}" // Windows arguments
+                        : $"-c 4 -W 1 {host}",    // Unix arguments
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                // Set timeout
+                var timeoutMs = 10000; // 10 seconds
+
+                try
+                {
+                    process.Start();
+                    
+                    var outputTask = process.StandardOutput.ReadToEndAsync();
+                    var errorTask = process.StandardError.ReadToEndAsync();
+                    
+                    bool exitedInTime = await Task.Run(() => process.WaitForExit(timeoutMs));
+                    
+                    if (!exitedInTime)
+                    {
+                        process.Kill();
+                        result.Error = "Ping command timed out";
+                        return result;
+                    }
+                    
+                    result.Output = await outputTask;
+                    result.Error = await errorTask;
+                    result.ExitCode = process.ExitCode;
+                    result.Success = process.ExitCode == 0;
+                    
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error executing ping command for host: {Host}", host);
+                    result.Error = "Error executing ping command";
+                    return result;
+                }
+            }
+        }
+
+        // Formats command arguments safely
+        private string FormatCommandArguments(string searchTerm)
+        {
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                // Windows findstr syntax
+                return $"/c:\"{searchTerm}\" \"{Path.GetFileName(_logFilePath)}\"";
+            }
+            else
+            {
+                // Unix grep syntax
+                return $"-e \"{searchTerm}\" \"{Path.GetFileName(_logFilePath)}\"";
+            }
+        }
+
+        // Validates search term input
+        private void ValidateSearchTerm(string searchTerm)
+        {
+            if (string.IsNullOrEmpty(searchTerm))
+            {
+                throw new ValidationException("Search term cannot be empty");
+            }
+
+            // Limit search term length
+            if (searchTerm.Length > 100)
+            {
+                throw new ValidationException("Search term is too long (max 100 characters)");
+            }
+
+            // Allow only alphanumeric characters, spaces, and some punctuation
+            if (!Regex.IsMatch(searchTerm, @"^[a-zA-Z0-9\s.,_\-:;]+$"))
+            {
+                throw new ValidationException("Search term contains invalid characters");
+            }
+
+            // Check for potential command injection patterns
+            if (searchTerm.Contains("&") || searchTerm.Contains("|") ||
+                searchTerm.Contains(">") || searchTerm.Contains("<") ||
+                searchTerm.Contains("(") || searchTerm.Contains(")") ||
+                searchTerm.Contains("$") || searchTerm.Contains("`") ||
+                searchTerm.Contains("\\"))
+            {
+                throw new ValidationException("Search term contains disallowed characters");
+            }
+        }
+
+        // Validates hostname input
+        private void ValidateHostname(string host)
+        {
+            if (string.IsNullOrEmpty(host))
+            {
+                throw new ValidationException("Hostname cannot be empty");
+            }
+
+            // Check length
+            if (host.Length > 255)
+            {
+                throw new ValidationException("Hostname is too long");
+            }
+
+            // Validate hostname format (simplified, doesn't cover all valid hostnames)
+            // Allow: example.com, sub.example.com, 192.168.1.1
+            if (!Regex.IsMatch(host, @"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$") &&
+                !Regex.IsMatch(host, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"))
+            {
+                throw new ValidationException("Invalid hostname format");
+            }
+
+            // Check for potential command injection patterns
+            if (host.Contains("&") || host.Contains("|") ||
+                host.Contains(">") || host.Contains("<") ||
+                host.Contains("'") || host.Contains("\"") ||
+                host.Contains(";") || host.Contains("`") ||
+                host.Contains("(") || host.Contains(")") ||
+                host.Contains("$") || host.Contains(" ") ||
+                host.Contains("\\"))
+            {
+                throw new ValidationException("Hostname contains disallowed characters");
+            }
+
+            // Optionally validate IP addresses further
+            if (Regex.IsMatch(host, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"))
+            {
+                var parts = host.Split('.');
+                foreach (var part in parts)
+                {
+                    if (!int.TryParse(part, out int num) || num < 0 || num > 255)
+                    {
+                        throw new ValidationException("Invalid IP address format");
+                    }
+                }
+            }
+
+            // You could also check against allowlist of domains/networks
+            string[] allowedDomains = { "example.com", "microsoft.com", "github.com" };
+            string[] allowedNetworks = { "192.168.1.", "10.0.0." };
+
+            bool isAllowed = allowedDomains.Any(d => host.EndsWith(d, StringComparison.OrdinalIgnoreCase)) ||
+                            allowedNetworks.Any(n => host.StartsWith(n));
+
+            if (!isAllowed)
+            {
+                throw new ValidationException("Host is not in the allowed list");
+            }
+        }
+    }
+}
+```
+
+## JSON Injection Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Prevent JSON injection by properly validating and sanitizing data sent to and received from JSON endpoints. Use content type validation and safe JSON parsers."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using System.Net.Mime;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Schema;
+
+namespace SecureJsonHandling
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class JsonSecurityController : ControllerBase
+    {
+        private readonly ILogger<JsonSecurityController> _logger;
+        private readonly IJsonValidator _jsonValidator;
+
+        public JsonSecurityController(
+            ILogger<JsonSecurityController> logger,
+            IJsonValidator jsonValidator)
+        {
+            _logger = logger;
+            _jsonValidator = jsonValidator;
+        }
+
+        // INSECURE: Direct string concatenation to build JSON
+        [HttpGet("insecure")]
+        public IActionResult CreateJsonResponseInsecure([FromQuery] string name, [FromQuery] string email)
+        {
+            // NEVER DO THIS!
+            var responseJson = $@"{{
+                ""status"": ""success"",
+                ""user"": {{
+                    ""name"": ""{name}"",
+                    ""email"": ""{email}""
+                }}
+            }}";
+
+            return Content(responseJson, "application/json");
+        }
+
+        // SECURE: Using proper JSON serialization
+        [HttpGet("secure")]
+        public IActionResult CreateJsonResponseSecure([FromQuery] string name, [FromQuery] string email)
+        {
+            // Create a C# object and let the framework handle serialization
+            var response = new
+            {
+                status = "success",
+                user = new
+                {
+                    name = name,
+                    email = email
+                }
+            };
+
+            return Ok(response);
+        }
+
+        // INSECURE: Unsafe deserialization without validation
+        [HttpPost("deserialize-insecure")]
+        public IActionResult DeserializeJsonInsecure()
+        {
+            try
+            {
+                // INSECURE: Direct deserialization without validation
+                using (var reader = new StreamReader(Request.Body))
+                {
+                    string json = reader.ReadToEnd();
+                    var data = JsonConvert.DeserializeObject<dynamic>(json);
+                    
+                    // Process deserialized data
+                    return Ok(new { message = "Data processed", data });
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        // SECURE: Safe handling of JSON input with proper validation
+        [HttpPost("deserialize-secure")]
+        [Consumes("application/json")]
+        public async Task<IActionResult> DeserializeJsonSecure()
+        {
+            try
+            {
+                // Check content type
+                if (!Request.ContentType?.StartsWith(MediaTypeNames.Application.Json) == true)
+                {
+                    return StatusCode(415, new { error = "Content-Type must be application/json" });
+                }
+
+                // Read request body
+                string jsonData;
+                using (var reader = new StreamReader(Request.Body, Encoding.UTF8))
+                {
+                    jsonData = await reader.ReadToEndAsync();
+                }
+
+                // Validate JSON structure
+                if (!_jsonValidator.IsValidJson(jsonData))
+                {
+                    return BadRequest(new { error = "Invalid JSON format" });
+                }
+
+                // Define a schema for the expected JSON
+                var schema = new
+                {
+                    action = "",
+                    data = new
+                    {
+                        id = "",
+                        value = ""
+                    }
+                };
+
+                // Validate JSON against schema
+                var (isValid, validationErrors) = _jsonValidator.ValidateJsonSchema(jsonData, schema);
+                if (!isValid)
+                {
+                    return BadRequest(new { error = "JSON does not match expected schema", details = validationErrors });
+                }
+
+                // Safely deserialize to strongly-typed object
+                var typedData = System.Text.Json.JsonSerializer.Deserialize<UserActionRequest>(jsonData, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                // Additional validation on the deserialized object
+                if (string.IsNullOrEmpty(typedData.Action))
+                {
+                    return BadRequest(new { error = "Action is required" });
+                }
+
+                // Process the validated data
+                _logger.LogInformation("Processing action: {Action} for ID: {Id}", typedData.Action, typedData.Data.Id);
+                
+                return Ok(new { message = "Data processed successfully", data = typedData });
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning("JSON parsing error: {Message}", ex.Message);
+                return BadRequest(new { error = "Invalid JSON data" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing JSON request");
+                return StatusCode(500, new { error = "An error occurred while processing the request" });
+            }
+        }
+
+        // SECURE: Using System.Text.Json DOM API for flexible JSON handling
+        [HttpPost("process-json")]
+        [Consumes("application/json")]
+        public async Task<IActionResult> ProcessJsonWithDom()
+        {
+            try
+            {
+                // Check content type
+                if (!Request.ContentType?.StartsWith(MediaTypeNames.Application.Json) == true)
+                {
+                    return StatusCode(415, new { error = "Content-Type must be application/json" });
+                }
+
+                // Read JSON as a DOM
+                using (var document = await JsonDocument.ParseAsync(Request.Body))
+                {
+                    var root = document.RootElement;
+
+                    // Check if the expected properties exist
+                    if (!root.TryGetProperty("action", out var actionElement) ||
+                        actionElement.ValueKind != JsonValueKind.String)
+                    {
+                        return BadRequest(new { error = "Missing or invalid 'action' property" });
+                    }
+
+                    // Get action value
+                    string action = actionElement.GetString();
+
+                    // Validate action value
+                    if (!IsValidAction(action))
+                    {
+                        return BadRequest(new { error = "Invalid action value" });
+                    }
+
+                    // Process based on the action
+                    var result = ProcessAction(action, root);
+                    return Ok(result);
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning("JSON parsing error: {Message}", ex.Message);
+                return BadRequest(new { error = "Invalid JSON data" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing JSON request");
+                return StatusCode(500, new { error = "An error occurred while processing the request" });
+            }
+        }
+
+        // SECURE: JSON Web Token (JWT) validation example
+        [HttpPost("validate-jwt")]
+        public IActionResult ValidateJsonWebToken([FromBody] JwtRequest request)
+        {
+            if (request == null || string.IsNullOrEmpty(request.Token))
+            {
+                return BadRequest(new { error = "Token is required" });
+            }
+
+            try
+            {
+                // Validate the token format (this is a simple validation, not full JWT verification)
+                if (!_jsonValidator.IsValidJwtFormat(request.Token))
+                {
+                    return BadRequest(new { error = "Invalid token format" });
+                }
+
+                var (isValid, claims) = _jsonValidator.ValidateToken(request.Token);
+
+                if (isValid)
+                {
+                    return Ok(new { message = "Token is valid", claims });
+                }
+                else
+                {
+                    return Unauthorized(new { error = "Invalid or expired token" });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating JWT");
+                return StatusCode(500, new { error = "An error occurred while validating the token" });
+            }
+        }
+
+        // Helper methods
+        private bool IsValidAction(string action)
+        {
+            string[] allowedActions = { "create", "update", "delete", "view" };
+            return !string.IsNullOrEmpty(action) && allowedActions.Contains(action);
+        }
+
+        private object ProcessAction(string action, JsonElement root)
+        {
+            // Example processing based on action
+            switch (action)
+            {
+                case "create":
+                    // Process creation logic
+                    return new { status = "success", message = "Item created" };
+                case "update":
+                    // Process update logic
+                    return new { status = "success", message = "Item updated" };
+                case "delete":
+                    // Process deletion logic
+                    return new { status = "success", message = "Item deleted" };
+                case "view":
+                    // Process view logic
+                    return new { status = "success", message = "Item details", data = new { id = "123", name = "Example" } };
+                default:
+                    return new { status = "error", message = "Unsupported action" };
+            }
+        }
+    }
+
+    // Model classes
+    public class UserActionRequest
+    {
+        public string Action { get; set; }
+        public UserActionData Data { get; set; }
+    }
+
+    public class UserActionData
+    {
+        public string Id { get; set; }
+        public string Value { get; set; }
+    }
+
+    public class JwtRequest
+    {
+        public string Token { get; set; }
+    }
+
+    // JSON Validation Service
+    public interface IJsonValidator
+    {
+        bool IsValidJson(string json);
+        (bool isValid, string[] errors) ValidateJsonSchema(string json, object schemaObject);
+        bool IsValidJwtFormat(string token);
+        (bool isValid, Dictionary<string, string> claims) ValidateToken(string token);
+    }
+
+    public class JsonValidator : IJsonValidator
+    {
+        private readonly ILogger<JsonValidator> _logger;
+
+        public JsonValidator(ILogger<JsonValidator> logger)
+        {
+            _logger = logger;
+        }
+
+        public bool IsValidJson(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return false;
+
+            try
+            {
+                // Try to parse the JSON
+                using (JsonDocument.Parse(json))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public (bool isValid, string[] errors) ValidateJsonSchema(string json, object schemaObject)
+        {
+            if (string.IsNullOrEmpty(json) || schemaObject == null)
+                return (false, new[] { "Invalid input" });
+
+            try
+            {
+                // Convert schema object to JSchema for validation
+                var schemaJson = JsonConvert.SerializeObject(schemaObject);
+                JSchema schema = JSchema.Parse(schemaJson);
+
+                // Parse the JSON to validate
+                JObject jsonObject = JObject.Parse(json);
+
+                // Validate against schema
+                bool isValid = jsonObject.IsValid(schema, out IList<ValidationError> errors);
+
+                // Convert validation errors to string array
+                string[] errorMessages = errors?.Select(e => e.Message).ToArray() ?? Array.Empty<string>();
+
+                return (isValid, errorMessages);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during JSON schema validation");
+                return (false, new[] { "JSON validation error" });
+            }
+        }
+
+        public bool IsValidJwtFormat(string token)
+        {
+            if (string.IsNullOrEmpty(token))
+                return false;
+
+            // Check JWT format (header.payload.signature)
+            var regex = new Regex(@"^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$");
+            return regex.IsMatch(token);
+        }
+
+        public (bool isValid, Dictionary<string, string> claims) ValidateToken(string token)
+        {
+            // In a real application, use a proper JWT validation library like System.IdentityModel.Tokens.Jwt
+            // This is a simplified example
+
+            try
+            {
+                // Split the token into parts
+                var parts = token.Split('.');
+                if (parts.Length != 3)
+                {
+                    return (false, null);
+                }
+
+                // Decode the payload (second part)
+                var payloadJson = DecodeBase64Url(parts[1]);
+                
+                // Parse claims
+                var payloadData = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(payloadJson);
+                var claims = new Dictionary<string, string>();
+                
+                foreach (var claim in payloadData)
+                {
+                    claims[claim.Key] = claim.Value?.ToString();
+                }
+
+                // Check expiration (simplified)
+                if (payloadData.ContainsKey("exp") &&
+                    long.TryParse(payloadData["exp"].ToString(), out long expiration))
+                {
+                    var expirationDate = DateTimeOffset.FromUnixTimeSeconds(expiration).UtcDateTime;
+                    if (expirationDate < DateTime.UtcNow)
+                    {
+                        return (false, null); // Token expired
+                    }
+                }
+
+                // In a real implementation, verify the signature
+
+                return (true, claims);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating JWT token");
+                return (false, null);
+            }
+        }
+
+        private string DecodeBase64Url(string base64Url)
+        {
+            string padded = base64Url.Length % 4 == 0
+                ? base64Url
+                : base64Url + "====".Substring(base64Url.Length % 4);
+                
+            string base64 = padded
+                .Replace('-', '+')
+                .Replace('_', '/');
+                
+            byte[] bytes = Convert.FromBase64String(base64);
+            return Encoding.UTF8.GetString(bytes);
+        }
+    }
+}
+```
+
+## LDAP Injection Prevention
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Protect against LDAP injection by using proper LDAP filtering, escaping special characters, and validating all user inputs used in LDAP queries."
+}
+
+#### .NET Example
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.DirectoryServices;
+using System.DirectoryServices.Protocols;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace SecureLdapExample
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class DirectoryController : ControllerBase
+    {
+        private readonly ILdapService _ldapService;
+        private readonly ILogger<DirectoryController> _logger;
+
+        public DirectoryController(
+            ILdapService ldapService,
+            ILogger<DirectoryController> logger)
+        {
+            _ldapService = ldapService;
+            _logger = logger;
+        }
+
+        // INSECURE: Direct concatenation in LDAP filter
+        [HttpGet("users/insecure")]
+        public IActionResult SearchUsersInsecure([FromQuery] string username)
+        {
+            try
+            {
+                // NEVER DO THIS!
+                string filter = $"(&(objectClass=user)(sAMAccountName={username}))"; // VULNERABLE!
+                var users = _ldapService.SearchDirectoryInsecure(filter);
+                return Ok(users);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching users");
+                return StatusCode(500, new { error = "An error occurred while searching users" });
+            }
+        }
+
+        // SECURE: Using proper LDAP filter encoding
+        [HttpGet("users/secure")]
+        public IActionResult SearchUsersSecure([FromQuery] string username)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(username))
+                {
+                    return BadRequest(new { error = "Username parameter is required" });
+                }
+
+                // Validate username format
+                if (!IsValidUsername(username))
+                {
+                    return BadRequest(new { error = "Invalid username format" });
+                }
+
+                var users = _ldapService.SearchUsersByUsername(username);
+                return Ok(users);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching users");
+                return StatusCode(500, new { error = "An error occurred while searching users" });
+            }
+        }
+
+        // SECURE: Search by multiple attributes with parameter binding
+        [HttpGet("search")]
+        public IActionResult SearchDirectory([FromQuery] DirectorySearchRequest searchRequest)
+        {
+            try
+            {
+                if (searchRequest == null)
+                {
+                    return BadRequest(new { error = "Search parameters are required" });
+                }
+
+                // Additional manual validation if needed
+                if (!string.IsNullOrEmpty(searchRequest.FirstName) && !IsValidNameComponent(searchRequest.FirstName))
+                {
+                    return BadRequest(new { error = "Invalid first name format" });
+                }
+
+                if (!string.IsNullOrEmpty(searchRequest.LastName) && !IsValidNameComponent(searchRequest.LastName))
+                {
+                    return BadRequest(new { error = "Invalid last name format" });
+                }
+
+                var results = _ldapService.SearchDirectory(searchRequest);
+                return Ok(results);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching directory");
+                return StatusCode(500, new { error = "An error occurred while searching the directory" });
+            }
+        }
+
+        // SECURE: Retrieve a specific user by sampling ID
+        [HttpGet("users/{id}")]
+        public IActionResult GetUserById(string id)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(id))
+                {
+                    return BadRequest(new { error = "User ID is required" });
+                }
+
+                // Validate the user ID format
+                if (!IsValidUserId(id))
+                {
+                    return BadRequest(new { error = "Invalid user ID format" });
+                }
+
+                var user = _ldapService.GetUserById(id);
+                
+                if (user == null)
+                {
+                    return NotFound(new { error = "User not found" });
+                }
+                
+                return Ok(user);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving user by ID: {UserId}", id);
+                return StatusCode(500, new { error = "An error occurred while retrieving the user" });
+            }
+        }
+
+        // Validation methods
+        private bool IsValidUsername(string username)
+        {
+            if (string.IsNullOrEmpty(username))
+                return false;
+
+            // Allow alphanumeric characters, dots, hyphens, and underscores
+            return Regex.IsMatch(username, @"^[a-zA-Z0-9._-]{3,50}$");
+        }
+
+        private bool IsValidNameComponent(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            // Allow letters, spaces, hyphens, and apostrophes
+            return Regex.IsMatch(name, @"^[a-zA-Z\s'-]{1,50}$");
+        }
+
+        private bool IsValidUserId(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+                return false;
+
+            // Allow alphanumeric characters, hyphens, and underscores
+            return Regex.IsMatch(id, @"^[a-zA-Z0-9_-]{1,50}$");
+        }
+    }
+
+    // Search request model
+    public class DirectorySearchRequest
+    {
+        public string Username { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Email { get; set; }
+        public string Department { get; set; }
+        public bool IncludeDisabled { get; set; } = false;
+        public int MaxResults { get; set; } = 100;
+    }
+
+    // LDAP service interface
+    public interface ILdapService
+    {
+        IEnumerable<object> SearchDirectoryInsecure(string filter);
+        IEnumerable<object> SearchUsersByUsername(string username);
+        IEnumerable<object> SearchDirectory(DirectorySearchRequest searchRequest);
+        object GetUserById(string id);
+    }
+
+    // LDAP service implementation
+    public class LdapService : ILdapService
+    {
+        private readonly ILogger<LdapService> _logger;
+        private readonly string _ldapServer;
+        private readonly string _ldapUsername;
+        private readonly string _ldapPassword;
+        private readonly string _searchBase;
+
+        public LdapService(
+            IConfiguration configuration,
+            ILogger<LdapService> logger)
+        {
+            _logger = logger;
+            
+            // Get LDAP configuration
+            _ldapServer = configuration["LDAP:Server"];
+            _ldapUsername = configuration["LDAP:Username"];
+            _ldapPassword = configuration["LDAP:Password"];
+            _searchBase = configuration["LDAP:SearchBase"];
+            
+            // Validate configuration
+            if (string.IsNullOrEmpty(_ldapServer) || string.IsNullOrEmpty(_searchBase))
+            {
+                throw new ArgumentException("LDAP configuration is incomplete");
+            }
+        }
+
+        // INSECURE: Direct use of unvalidated filter
+        public IEnumerable<object> SearchDirectoryInsecure(string filter)
+        {
+            // NEVER DO THIS! This method is vulnerable to LDAP injection
+            
+            using (var connection = new LdapConnection(new LdapDirectoryIdentifier(_ldapServer)))
+            {
+                // Connect and bind
+                connection.Credential = new NetworkCredential(_ldapUsername, _ldapPassword);
+                connection.AuthType = AuthType.Basic;
+                connection.Bind();
+                
+                // Create search request
+                var request = new SearchRequest(
+                    _searchBase,
+                    filter, // VULNERABLE: Unvalidated filter
+                    SearchScope.Subtree,
+                    new string[] { "cn", "givenName", "sn", "mail", "sAMAccountName" }
+                );
+                
+                // Execute search
+                var response = (SearchResponse)connection.SendRequest(request);
+                
+                // Process results
+                var results = new List<object>();
+                foreach (SearchResultEntry entry in response.Entries)
+                {
+                    results.Add(new
+                    {
+                        DistinguishedName = entry.DistinguishedName,
+                        CommonName = GetAttributeValue(entry, "cn"),
+                        FirstName = GetAttributeValue(entry, "givenName"),
+                        LastName = GetAttributeValue(entry, "sn"),
+                        Email = GetAttributeValue(entry, "mail"),
+                        Username = GetAttributeValue(entry, "sAMAccountName")
+                    });
+                }
+                
+                return results;
+            }
+        }
+
+        // SECURE: Search users by username with proper filtering
+        public IEnumerable<object> SearchUsersByUsername(string username)
+        {
+            if (string.IsNullOrEmpty(username))
+            {
+                throw new ArgumentException("Username cannot be empty");
+            }
+            
+            // Validate username format
+            if (!Regex.IsMatch(username, @"^[a-zA-Z0-9._-]{3,50}$"))
+            {
+                throw new ArgumentException("Invalid username format");
+            }
+            
+            // Escape special characters in the username
+            string escapedUsername = EscapeLdapSearchFilter(username);
+            
+            // Create a properly formatted LDAP filter
+            string filter = $"(&(objectClass=user)(sAMAccountName={escapedUsername}))";
+            
+            return ExecuteSearch(filter);
+        }
+
+        // SECURE: Search directory with multiple criteria
+        public IEnumerable<object> SearchDirectory(DirectorySearchRequest searchRequest)
+        {
+            if (searchRequest == null)
+            {
+                throw new ArgumentException("Search request cannot be null");
+            }
+            
+            // Build a filter with multiple criteria
+            var filterParts = new List<string>
+            {
+                "(objectClass=user)" // Base filter for users
+            };
+            
+            // Add search criteria if provided
+            if (!string.IsNullOrEmpty(searchRequest.Username))
+            {
+                // Validate and escape username
+                if (!Regex.IsMatch(searchRequest.Username, @"^[a-zA-Z0-9._-]{3,50}$"))
+                {
+                    throw new ArgumentException("Invalid username format");
+                }
+                
+                string escapedUsername = EscapeLdapSearchFilter(searchRequest.Username);
+                filterParts.Add($"(sAMAccountName={escapedUsername})");
+            }
+            
+            if (!string.IsNullOrEmpty(searchRequest.FirstName))
+            {
+                // Validate and escape first name
+                if (!Regex.IsMatch(searchRequest.FirstName, @"^[a-zA-Z\s'-]{1,50}$"))
+                {
+                    throw new ArgumentException("Invalid first name format");
+                }
+                
+                string escapedFirstName = EscapeLdapSearchFilter(searchRequest.FirstName);
+                filterParts.Add($"(givenName={escapedFirstName})");
+            }
+            
+            if (!string.IsNullOrEmpty(searchRequest.LastName))
+            {
+                // Validate and escape last name
+                if (!Regex.IsMatch(searchRequest.LastName, @"^[a-zA-Z\s'-]{1,50}$"))
+                {
+                    throw new ArgumentException("Invalid last name format");
+                }
+                
+                string escapedLastName = EscapeLdapSearchFilter(searchRequest.LastName);
+                filterParts.Add($"(sn={escapedLastName})");
+            }
+            
+            if (!string.IsNullOrEmpty(searchRequest.Email))
+            {
+                // Validate email format
+                if (!Regex.IsMatch(searchRequest.Email, @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"))
+                {
+                    throw new ArgumentException("Invalid email format");
+                }
+                
+                string escapedEmail = EscapeLdapSearchFilter(searchRequest.Email);
+                filterParts.Add($"(mail={escapedEmail})");
+            }
+            
+            if (!string.IsNullOrEmpty(searchRequest.Department))
+            {
+                // Validate department name
+                if (!Regex.IsMatch(searchRequest.Department, @"^[a-zA-Z0-9\s-]{1,50}$"))
+                {
+                    throw new ArgumentException("Invalid department format");
+                }
+                
+                string escapedDepartment = EscapeLdapSearchFilter(searchRequest.Department);
+                filterParts.Add($"(department={escapedDepartment})");
+            }
+            
+            // Add filter for disabled accounts if required
+            if (!searchRequest.IncludeDisabled)
+            {
+                filterParts.Add("(!(userAccountControl:1.2.840.113556.1.4.803:=2))"); // Not disabled
+            }
+            
+            // Combine all conditions with AND
+            string filter = $"(&{string.Join("", filterParts)})";
+            
+            // Limit results for security
+            int maxResults = Math.Min(searchRequest.MaxResults, 1000);
+            
+            return ExecuteSearch(filter, maxResults);
+        }
+
+        // SECURE: Get user by ID with proper filtering
+        public object GetUserById(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                throw new ArgumentException("User ID cannot be empty");
+            }
+            
+            // Validate ID format
+            if (!Regex.IsMatch(id, @"^[a-zA-Z0-9_-]{1,50}$"))
+            {
+                throw new ArgumentException("Invalid user ID format");
+            }
+            
+            // Escape special characters in the ID
+            string escapedId = EscapeLdapSearchFilter(id);
+            
+            // Create filter to search by various ID attributes
+            string filter = $"(&(objectClass=user)(|(sAMAccountName={escapedId})(objectGUID={escapedId})(employeeID={escapedId})))";
+            
+            var results = ExecuteSearch(filter, 1);
+            return results.FirstOrDefault();
+        }
+
+        // Helper method to execute LDAP search
+        private IEnumerable<object> ExecuteSearch(string filter, int sizeLimit = 100)
+        {
+            // Log the filter for debugging (don't log in production as it might contain sensitive information)
+            _logger.LogDebug("LDAP search filter: {Filter}", filter);
+            
+            try
+            {
+                using (var connection = new LdapConnection(new LdapDirectoryIdentifier(_ldapServer)))
+                {
+                    // Connect and bind
+                    connection.Credential = new NetworkCredential(_ldapUsername, _ldapPassword);
+                    connection.AuthType = AuthType.Basic;
+                    connection.Bind();
+                    
+                    // Create search request with size limit
+                    var request = new SearchRequest(
+                        _searchBase,
+                        filter,
+                        SearchScope.Subtree,
+                        new string[] { "cn", "givenName", "sn", "mail", "sAMAccountName", "department", "title" }
+                    )
+                    {
+                        SizeLimit = sizeLimit
+                    };
+                    
+                    // Execute search
+                    var response = (SearchResponse)connection.SendRequest(request);
+                    
+                    // Process results
+                    var results = new List<object>();
+                    foreach (SearchResultEntry entry in response.Entries)
+                    {
+                        results.Add(new
+                        {
+                            DistinguishedName = entry.DistinguishedName,
+                            CommonName = GetAttributeValue(entry, "cn"),
+                            FirstName = GetAttributeValue(entry, "givenName"),
+                            LastName = GetAttributeValue(entry, "sn"),
+                            Email = GetAttributeValue(entry, "mail"),
+                            Username = GetAttributeValue(entry, "sAMAccountName"),
+                            Department = GetAttributeValue(entry, "department"),
+                            Title = GetAttributeValue(entry, "title")
+                        });
+                    }
+                    
+                    return results;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "LDAP search error");
+                throw;
+            }
+        }
+
+        // SECURE: Helper method to escape LDAP special characters
+        private string EscapeLdapSearchFilter(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+            {
+                return input;
+            }
+            
+            // Escape special characters
+            // LDAP filter special characters: * ( ) \ NUL / & | = > < ! ~
+            StringBuilder sb = new StringBuilder();
+            foreach (char c in input)
+            {
+                switch (c)
+                {
+                    case '\\': sb.Append("\\5c"); break;
+                    case '(': sb.Append("\\28"); break;
+                    case ')': sb.Append("\\29"); break;
+                    case '*': sb.Append("\\2a"); break;
+                    case '/': sb.Append("\\2f"); break;
+                    case '\0': sb.Append("\\00"); break;
+                    case '&': sb.Append("\\26"); break;
+                    case '|': sb.Append("\\7c"); break;
+                    case '=': sb.Append("\\3d"); break;
+                    case '>': sb.Append("\\3e"); break;
+                    case '<': sb.Append("\\3c"); break;
+                    case '!': sb.Append("\\21"); break;
+                    case '~': sb.Append("\\7e"); break;
+                    default: sb.Append(c); break;
+                }
+            }
+            
+            return sb.ToString();
+        }
+
+        // Helper method to get attribute value
+        private string GetAttributeValue(SearchResultEntry entry, string attributeName)
+        {
+            if (entry.Attributes.Contains(attributeName) && entry.Attributes[attributeName].Count > 0)
+            {
+                return entry.Attributes[attributeName][0].ToString();
+            }
+            
+            return null;
+        }
+    }
+}
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "negative_validation",
+        "wrong": "Using negative validation (blocklists) to filter out bad characters",
+        "correct": "Using positive validation (allowlists) to accept only known good data",
+        "reason": "Blocklists are often incomplete and can be bypassed with encoding tricks or undocumented inputs"
+    },
+    {
+        "id": "client_side_only_validation",
+        "wrong": "Relying solely on client-side validation",
+        "correct": "Implementing both client-side and server-side validation",
+        "reason": "Client-side validation can be bypassed by attackers using proxy tools or API calls"
+    },
+    {
+        "id": "insufficient_url_validation",
+        "wrong": "Simple string checks for URL validation (e.g., StartsWith, Contains)",
+        "correct": "Full URL parsing with Uri class and domain allowlisting",
+        "reason": "Simple string checks can be bypassed with URL encoding or special formats"
+    },
+    {
+        "id": "inline_shell_commands",
+        "wrong": "Using shell=true or concatenating strings for system commands",
+        "correct": "Using ProcessStartInfo with arguments array and shell=false",
+        "reason": "Shell commands with user input allow command injection attacks"
+    },
+    {
+        "id": "direct_json_string",
+        "wrong": "Building JSON strings via string concatenation or interpolation",
+        "correct": "Using Json.NET or System.Text.Json serializers",
+        "reason": "String building can result in invalid JSON or allow injection attacks"
+    },
+    {
+        "id": "inconsistent_schema",
+        "wrong": "Ad-hoc validation for each endpoint or method",
+        "correct": "Using model validation attributes or FluentValidation consistently",
+        "reason": "Inconsistent validation leads to gaps in security and maintenance challenges"
+    },
+    {
+        "id": "ldap_unescaped",
+        "wrong": "Directly inserting user input into LDAP filters",
+        "correct": "Escaping special LDAP characters and using proper filter formatting",
+        "reason": "Unescaped input in LDAP filters allows LDAP injection attacks"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Input Validation Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
+- [OWASP .NET Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/DotNet_Security_Cheat_Sheet.html)
+- [OWASP Query Parameterization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html)
+- [OWASP LDAP Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html)
+- [Microsoft ASP.NET Core Validation Documentation](https://docs.microsoft.com/en-us/aspnet/core/mvc/models/validation)
+- [Microsoft Data Protection in ASP.NET Core](https://docs.microsoft.com/en-us/aspnet/core/security/data-protection/introduction)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

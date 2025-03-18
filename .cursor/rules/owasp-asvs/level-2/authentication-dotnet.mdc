@@ -1,0 +1,2068 @@
+---
+description: OWASP ASVS Level 2 requirements for advanced authentication security implementation in .NET applications
+globs: ["**/*.{cs,cshtml,razor}"]
+---
+
+# Advanced Authentication Security (ASVS Level 2)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 2,
+    "category": "V2 - Authentication",
+    "language": "dotnet"
+}
+
+## Overview
+
+Level 2 authentication requirements expand on the foundational Level 1 controls, adding more comprehensive protections required for applications that handle sensitive data or business functions. These controls focus on robust authentication mechanisms, credential management, and mitigating sophisticated attacks.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v2.1.2",
+        "severity": "high",
+        "description": "Password composition and complexity follow modern standards, with at least 12 characters and no composition requirements",
+        "verification": "Verify that passwords are at least 12 characters in length (after multiple spaces are combined)"
+    },
+    {
+        "id": "v2.1.8",
+        "severity": "high",
+        "description": "Password strength meters help users set stronger passwords",
+        "verification": "Verify that a password strength meter is provided to help users set stronger passwords"
+    },
+    {
+        "id": "v2.1.11",
+        "severity": "high",
+        "description": "All authentication decisions reject with a generic message using identical response time",
+        "verification": "Verify that all authentication decisions are logged, without storing sensitive session identifiers or passwords. This should include requests with missing required information, needed for security investigations."
+    },
+    {
+        "id": "v2.2.2",
+        "severity": "high",
+        "description": "Multi-factor authentication is available for high-value accounts",
+        "verification": "Verify that multi-factor authentication is offered to users to protect against credential theft"
+    },
+    {
+        "id": "v2.2.3",
+        "severity": "high",
+        "description": "Account recovery processes use secure methods, not knowledge-based answers",
+        "verification": "Verify that account recovery does not rely on knowledge-based answers"
+    },
+    {
+        "id": "v2.3.1",
+        "severity": "high",
+        "description": "Credential rotation requirements enable users to change passwords when needed",
+        "verification": "Verify that password changes include the old password, the new password, and password confirmation"
+    },
+    {
+        "id": "v2.8.3",
+        "severity": "high",
+        "description": "Password managers are supported with effective forms",
+        "verification": "Verify that forms containing credentials are filled by password managers"
+    }
+]
+
+## Implementation Guidelines
+
+### Strong Password Policies
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Implement modern password policies that focus on length rather than complexity rules. Require at least 12 characters, but avoid arbitrary composition requirements that reduce password usability. Provide clear feedback on password strength."
+}
+
+#### ASP.NET Core Identity Example
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using System;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+
+namespace SecureApp
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddDbContext<ApplicationDbContext>(options =>
+                options.UseSqlServer(Configuration.GetConnectionString("DefaultConnection")));
+
+            // SECURE: Configure ASP.NET Core Identity with modern password policy
+            services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+            {
+                // Configure password settings following modern guidelines
+                options.Password.RequiredLength = 12; // Minimum 12 characters
+                options.Password.RequireDigit = false; // Don't require digits
+                options.Password.RequireLowercase = false; // Don't require lowercase
+                options.Password.RequireUppercase = false; // Don't require uppercase
+                options.Password.RequireNonAlphanumeric = false; // Don't require special chars
+                
+                // Custom password validator will be added to enforce better policies
+                
+                // Lockout settings
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.AllowedForNewUsers = true;
+                
+                // User settings
+                options.User.RequireUniqueEmail = true;
+            })
+            .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddDefaultTokenProviders();
+            
+            // Add custom password validator that implements better policies
+            services.AddScoped<IPasswordValidator<ApplicationUser>, ModernPasswordValidator>();
+            
+            // Add password strength evaluator service
+            services.AddScoped<IPasswordStrengthEvaluator, ZxcvbnPasswordStrengthEvaluator>();
+
+            services.AddControllersWithViews();
+            services.AddRazorPages();
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+                app.UseDatabaseErrorPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                app.UseHsts();
+            }
+
+            app.UseHttpsRedirection();
+            app.UseStaticFiles();
+
+            app.UseRouting();
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+                endpoints.MapRazorPages();
+            });
+        }
+    }
+
+    // Custom password validator implementing modern best practices
+    public class ModernPasswordValidator : IPasswordValidator<ApplicationUser>
+    {
+        private readonly IPasswordStrengthEvaluator _strengthEvaluator;
+
+        public ModernPasswordValidator(IPasswordStrengthEvaluator strengthEvaluator)
+        {
+            _strengthEvaluator = strengthEvaluator;
+        }
+
+        public Task<IdentityResult> ValidateAsync(UserManager<ApplicationUser> manager, ApplicationUser user, string password)
+        {
+            var errors = new List<IdentityError>();
+            
+            // Normalize the password by replacing multiple spaces with a single space
+            string normalizedPassword = Regex.Replace(password, @"\s+", " ");
+            
+            // Check minimum length after normalization
+            if (normalizedPassword.Length < 12)
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = "PasswordTooShort",
+                    Description = "Password must be at least 12 characters long."
+                });
+            }
+            
+            // Check for common passwords or patterns (using the strength evaluator)
+            var strength = _strengthEvaluator.EvaluatePassword(password);
+            
+            if (strength.Score < 2) // Score range is 0-4, with 4 being strongest
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = "PasswordTooWeak",
+                    Description = "Password is too weak. " + strength.Feedback
+                });
+            }
+            
+            // Check if password contains user information
+            if (user.Email != null && password.Contains(user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = "PasswordContainsEmail",
+                    Description = "Password cannot contain your email address."
+                });
+            }
+            
+            if (user.UserName != null && password.Contains(user.UserName, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = "PasswordContainsUsername",
+                    Description = "Password cannot contain your username."
+                });
+            }
+            
+            return Task.FromResult(errors.Count == 0 ?
+                IdentityResult.Success :
+                IdentityResult.Failed(errors.ToArray()));
+        }
+    }
+
+    // Interface for password strength evaluation
+    public interface IPasswordStrengthEvaluator
+    {
+        PasswordStrength EvaluatePassword(string password);
+    }
+
+    // Password strength result class
+    public class PasswordStrength
+    {
+        public int Score { get; set; } // 0-4 score, with 4 being strongest
+        public string Feedback { get; set; } // Feedback message for the user
+    }
+
+    // Implementation using zxcvbn-cs library
+    // This requires the zxcvbn-cs NuGet package
+    public class ZxcvbnPasswordStrengthEvaluator : IPasswordStrengthEvaluator
+    {
+        public PasswordStrength EvaluatePassword(string password)
+        {
+            // Use the zxcvbn library to evaluate password strength
+            var result = Zxcvbn.Core.EvaluatePassword(password);
+            
+            string feedback = string.Empty;
+            
+            if (!string.IsNullOrEmpty(result.Feedback.Warning))
+            {
+                feedback = result.Feedback.Warning;
+            }
+            
+            if (result.Feedback.Suggestions.Any())
+            {
+                if (!string.IsNullOrEmpty(feedback))
+                {
+                    feedback += " ";
+                }
+                feedback += string.Join(" ", result.Feedback.Suggestions);
+            }
+            
+            return new PasswordStrength
+            {
+                Score = result.Score,
+                Feedback = feedback
+            };
+        }
+    }
+
+    // Account controller with password change functionality
+    public class AccountController : Controller
+    {
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly IPasswordStrengthEvaluator _strengthEvaluator;
+        private readonly ILogger<AccountController> _logger;
+
+        public AccountController(
+            UserManager<ApplicationUser> userManager,
+            SignInManager<ApplicationUser> signInManager,
+            IPasswordStrengthEvaluator strengthEvaluator,
+            ILogger<AccountController> logger)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _strengthEvaluator = strengthEvaluator;
+            _logger = logger;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> ChangePassword()
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            var model = new ChangePasswordViewModel();
+            return View(model);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ChangePassword(ChangePasswordViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            var startTime = DateTime.UtcNow;
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                // Apply consistent timing to prevent user existence leakage
+                await Task.Delay(GetConsistentDelay(startTime));
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            // SECURE: Change password requires old password, new password, and confirmation
+            var changePasswordResult = await _userManager.ChangePasswordAsync(
+                user, model.OldPassword, model.NewPassword);
+
+            if (changePasswordResult.Succeeded)
+            {
+                _logger.LogInformation("User changed their password successfully.");
+                
+                // Re-sign in the user with the new password
+                await _signInManager.SignInAsync(user, isPersistent: false);
+                
+                // Apply consistent timing
+                await Task.Delay(GetConsistentDelay(startTime));
+                
+                return RedirectToAction(nameof(ChangePasswordConfirmation));
+            }
+            
+            // Add the validation errors to the model
+            foreach (var error in changePasswordResult.Errors)
+            {
+                ModelState.AddModelError(string.Empty, error.Description);
+            }
+            
+            // Apply consistent timing to prevent leaking which validation failed
+            await Task.Delay(GetConsistentDelay(startTime));
+            
+            return View(model);
+        }
+
+        [HttpGet]
+        public IActionResult ChangePasswordConfirmation()
+        {
+            return View();
+        }
+
+        [HttpGet]
+        public IActionResult EvaluatePasswordStrength(string password)
+        {
+            if (string.IsNullOrEmpty(password))
+            {
+                return Json(new { score = 0, feedback = "Please enter a password." });
+            }
+
+            var strength = _strengthEvaluator.EvaluatePassword(password);
+            
+            return Json(new
+            {
+                score = strength.Score,
+                feedback = strength.Feedback
+            });
+        }
+
+        private int GetConsistentDelay(DateTime startTime)
+        {
+            // Aim for a consistent response time of 800 milliseconds
+            const int targetResponseTimeMs = 800;
+            
+            var elapsed = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+            var delayMs = Math.Max(0, targetResponseTimeMs - elapsed);
+            
+            return delayMs;
+        }
+    }
+
+    // View model for password change
+    public class ChangePasswordViewModel
+    {
+        [Required]
+        [DataType(DataType.Password)]
+        [Display(Name = "Current password")]
+        public string OldPassword { get; set; }
+
+        [Required]
+        [StringLength(100, ErrorMessage = "The {0} must be at least {2} characters long.", MinimumLength = 12)]
+        [DataType(DataType.Password)]
+        [Display(Name = "New password")]
+        public string NewPassword { get; set; }
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirm new password")]
+        [Compare("NewPassword", ErrorMessage = "The new password and confirmation password do not match.")]
+        public string ConfirmPassword { get; set; }
+    }
+
+    // Razor Views
+    // ChangePassword.cshtml:
+    /*
+    @model ChangePasswordViewModel
+    
+    <h4>Change Password</h4>
+    <div class="row">
+        <div class="col-md-6">
+            <form id="change-password-form" method="post">
+                <div asp-validation-summary="All" class="text-danger"></div>
+                
+                <div class="form-group">
+                    <label asp-for="OldPassword"></label>
+                    <input asp-for="OldPassword" class="form-control" autocomplete="current-password" />
+                    <span asp-validation-for="OldPassword" class="text-danger"></span>
+                </div>
+                
+                <div class="form-group">
+                    <label asp-for="NewPassword"></label>
+                    <input asp-for="NewPassword" class="form-control" autocomplete="new-password" id="new-password" />
+                    <span asp-validation-for="NewPassword" class="text-danger"></span>
+                    
+                    <div class="password-strength-meter mt-2">
+                        <div class="progress">
+                            <div id="password-strength-meter" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <small id="password-strength-text" class="form-text"></small>
+                        <small id="password-strength-feedback" class="form-text text-muted"></small>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label asp-for="ConfirmPassword"></label>
+                    <input asp-for="ConfirmPassword" class="form-control" autocomplete="new-password" />
+                    <span asp-validation-for="ConfirmPassword" class="text-danger"></span>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Change password</button>
+            </form>
+        </div>
+    </div>
+    
+    @section Scripts {
+        <partial name="_ValidationScriptsPartial" />
+        
+        <script>
+            $(document).ready(function() {
+                // Password strength meter
+                $('#new-password').on('input', function() {
+                    var password = $(this).val();
+                    
+                    if (!password) {
+                        updateStrengthMeter(0, '');
+                        return;
+                    }
+                    
+                    // Call API to evaluate password strength
+                    $.getJSON('@Url.Action("EvaluatePasswordStrength", "Account")', { password: password })
+                        .done(function(data) {
+                            updateStrengthMeter(data.score, data.feedback);
+                        })
+                        .fail(function() {
+                            updateStrengthMeter(0, 'Error evaluating password strength');
+                        });
+                });
+                
+                function updateStrengthMeter(score, feedback) {
+                    var percentage = (score / 4) * 100;
+                    var meterElement = $('#password-strength-meter');
+                    var textElement = $('#password-strength-text');
+                    var feedbackElement = $('#password-strength-feedback');
+                    
+                    // Update progress bar
+                    meterElement.css('width', percentage + '%');
+                    meterElement.attr('aria-valuenow', percentage);
+                    
+                    // Update color based on score
+                    if (score >= 3) {
+                        meterElement.removeClass('bg-danger bg-warning').addClass('bg-success');
+                    } else if (score >= 2) {
+                        meterElement.removeClass('bg-danger bg-success').addClass('bg-warning');
+                    } else {
+                        meterElement.removeClass('bg-success bg-warning').addClass('bg-danger');
+                    }
+                    
+                    // Update text
+                    var strengthText = '';
+                    switch (score) {
+                        case 0:
+                            strengthText = 'Very Weak';
+                            break;
+                        case 1:
+                            strengthText = 'Weak';
+                            break;
+                        case 2:
+                            strengthText = 'Fair';
+                            break;
+                        case 3:
+                            strengthText = 'Good';
+                            break;
+                        case 4:
+                            strengthText = 'Strong';
+                            break;
+                    }
+                    
+                    textElement.text(strengthText);
+                    feedbackElement.text(feedback);
+                }
+            });
+        </script>
+    }
+    */
+
+    // Required classes
+    public class ApplicationDbContext : DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
+        
+        public DbSet<ApplicationUser> Users { get; set; }
+    }
+
+    public class ApplicationUser : IdentityUser
+    {
+        // Add additional profile data here
+    }
+}
+```
+
+### Multi-Factor Authentication (MFA)
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Implement MFA options for users, especially for high-value accounts. Use time-based one-time passwords (TOTP), SMS codes, or hardware tokens depending on security needs."
+}
+
+#### ASP.NET Core Identity Example
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using QRCoder;
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Threading.Tasks;
+
+namespace SecureApp.Controllers
+{
+    [Authorize]
+    public class MfaController : Controller
+    {
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly ILogger<MfaController> _logger;
+        private readonly UrlEncoder _urlEncoder;
+
+        public MfaController(
+            UserManager<ApplicationUser> userManager,
+            SignInManager<ApplicationUser> signInManager,
+            ILogger<MfaController> logger,
+            UrlEncoder urlEncoder)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _logger = logger;
+            _urlEncoder = urlEncoder;
+        }
+
+        // GET: Display MFA setup page
+        [HttpGet]
+        public async Task<IActionResult> Setup()
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            var isMfaEnabled = await _userManager.GetTwoFactorEnabledAsync(user);
+            if (isMfaEnabled)
+            {
+                return RedirectToAction(nameof(Manage));
+            }
+
+            // Generate the authenticator key
+            var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            if (string.IsNullOrEmpty(unformattedKey))
+            {
+                await _userManager.ResetAuthenticatorKeyAsync(user);
+                unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            }
+
+            var model = new SetupMfaViewModel
+            {
+                AuthenticatorKey = FormatKey(unformattedKey),
+                QrCodeUrl = await GenerateQrCodeUri(user, unformattedKey)
+            };
+
+            return View(model);
+        }
+
+        // POST: Enable MFA after verification
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Setup(SetupMfaViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            var isMfaEnabled = await _userManager.GetTwoFactorEnabledAsync(user);
+            if (isMfaEnabled)
+            {
+                return RedirectToAction(nameof(Manage));
+            }
+
+            // Verify the code
+            var verificationCode = model.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
+            var is2faTokenValid = await _userManager.VerifyTwoFactorTokenAsync(
+                user, _userManager.Options.Tokens.AuthenticatorTokenProvider, verificationCode);
+
+            if (!is2faTokenValid)
+            {
+                ModelState.AddModelError("Code", "Verification code is invalid.");
+                
+                // Regenerate the model data
+                var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+                model.AuthenticatorKey = FormatKey(unformattedKey);
+                model.QrCodeUrl = await GenerateQrCodeUri(user, unformattedKey);
+                
+                return View(model);
+            }
+
+            // Enable 2FA
+            await _userManager.SetTwoFactorEnabledAsync(user, true);
+            
+            _logger.LogInformation("User with ID '{UserId}' has enabled MFA with an authenticator app.", user.Id);
+
+            // Generate recovery codes
+            var recoveryCodes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+            
+            // IMPORTANT: Store recovery codes securely
+            TempData["RecoveryCodes"] = recoveryCodes;
+            
+            return RedirectToAction(nameof(SetupComplete));
+        }
+
+        // GET: Show recovery codes after successful setup
+        [HttpGet]
+        public IActionResult SetupComplete()
+        {
+            var recoveryCodes = TempData["RecoveryCodes"] as string[];
+            if (recoveryCodes == null || recoveryCodes.Length == 0)
+            {
+                return RedirectToAction(nameof(Manage));
+            }
+
+            var model = new RecoveryCodesViewModel { RecoveryCodes = recoveryCodes };
+            return View(model);
+        }
+
+        // GET: Manage MFA settings
+        [HttpGet]
+        public async Task<IActionResult> Manage()
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            var isMfaEnabled = await _userManager.GetTwoFactorEnabledAsync(user);
+            var recoveryCodesLeft = await _userManager.CountRecoveryCodesAsync(user);
+
+            var model = new ManageMfaViewModel
+            {
+                IsMfaEnabled = isMfaEnabled,
+                RecoveryCodesLeft = recoveryCodesLeft
+            };
+
+            return View(model);
+        }
+
+        // POST: Disable MFA
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Disable()
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            // Require reauthorization for security
+            return RedirectToAction(nameof(ConfirmDisable));
+        }
+
+        // GET: Confirm MFA disable with password
+        [HttpGet]
+        public IActionResult ConfirmDisable()
+        {
+            return View();
+        }
+
+        // POST: Confirm MFA disable with password
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ConfirmDisable(ConfirmDisableMfaViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            // Verify password for security
+            var isPasswordCorrect = await _userManager.CheckPasswordAsync(user, model.Password);
+            if (!isPasswordCorrect)
+            {
+                ModelState.AddModelError(string.Empty, "Incorrect password.");
+                return View(model);
+            }
+
+            // Disable 2FA
+            var disable2faResult = await _userManager.SetTwoFactorEnabledAsync(user, false);
+            if (!disable2faResult.Succeeded)
+            {
+                throw new InvalidOperationException($"Unexpected error occurred disabling MFA for user with ID '{user.Id}'.");
+            }
+
+            _logger.LogInformation("User with ID '{UserId}' has disabled MFA.", user.Id);
+            
+            return RedirectToAction(nameof(Manage));
+        }
+
+        // POST: Generate new recovery codes
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> GenerateRecoveryCodes()
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
+            }
+
+            var isMfaEnabled = await _userManager.GetTwoFactorEnabledAsync(user);
+            if (!isMfaEnabled)
+            {
+                throw new InvalidOperationException($"Cannot generate recovery codes for user with ID '{user.Id}' because MFA is not enabled.");
+            }
+
+            // Generate new recovery codes
+            var recoveryCodes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+            
+            _logger.LogInformation("User with ID '{UserId}' has generated new MFA recovery codes.", user.Id);
+            
+            // Show the recovery codes
+            TempData["RecoveryCodes"] = recoveryCodes;
+            return RedirectToAction(nameof(ShowRecoveryCodes));
+        }
+
+        // GET: Show generated recovery codes
+        [HttpGet]
+        public IActionResult ShowRecoveryCodes()
+        {
+            var recoveryCodes = TempData["RecoveryCodes"] as string[];
+            if (recoveryCodes == null || recoveryCodes.Length == 0)
+            {
+                return RedirectToAction(nameof(Manage));
+            }
+
+            var model = new RecoveryCodesViewModel { RecoveryCodes = recoveryCodes };
+            return View(model);
+        }
+
+        // Helper methods
+        private string FormatKey(string unformattedKey)
+        {
+            var result = new StringBuilder();
+            int currentPosition = 0;
+            
+            while (currentPosition + 4 < unformattedKey.Length)
+            {
+                result.Append(unformattedKey.Substring(currentPosition, 4)).Append(" ");
+                currentPosition += 4;
+            }
+            
+            if (currentPosition < unformattedKey.Length)
+            {
+                result.Append(unformattedKey.Substring(currentPosition));
+            }
+
+            return result.ToString().ToLowerInvariant();
+        }
+
+        private async Task<string> GenerateQrCodeUri(ApplicationUser user, string unformattedKey)
+        {
+            string email = await _userManager.GetEmailAsync(user);
+            string encodedEmail = _urlEncoder.Encode(email);
+            
+            string authenticatorUri = $"otpauth://totp/{encodedEmail}?secret={unformattedKey}&issuer=SecureApp";
+            
+            // Generate QR code
+            using (var qrGenerator = new QRCodeGenerator())
+            {
+                var qrCodeData = qrGenerator.CreateQrCode(authenticatorUri, QRCodeGenerator.ECCLevel.M);
+                var qrCode = new QRCode(qrCodeData);
+                using (var bitmap = qrCode.GetGraphic(20))
+                {
+                    using (var ms = new MemoryStream())
+                    {
+                        bitmap.Save(ms, ImageFormat.Png);
+                        var imageBytes = ms.ToArray();
+                        return $"data:image/png;base64,{Convert.ToBase64String(imageBytes)}";
+                    }
+                }
+            }
+        }
+    }
+
+    // MFA verification during login
+    public class AccountController : Controller
+    {
+        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly ILogger<AccountController> _logger;
+
+        public AccountController(
+            SignInManager<ApplicationUser> signInManager,
+            UserManager<ApplicationUser> userManager,
+            ILogger<AccountController> logger)
+        {
+            _signInManager = signInManager;
+            _userManager = userManager;
+            _logger = logger;
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginViewModel model, string returnUrl = null)
+        {
+            returnUrl ??= Url.Content("~/");
+
+            if (ModelState.IsValid)
+            {
+                // Record start time for consistent timing
+                var startTime = DateTime.UtcNow;
+                
+                // Sign in with password
+                var result = await _signInManager.PasswordSignInAsync(
+                    model.Email,
+                    model.Password,
+                    model.RememberMe,
+                    lockoutOnFailure: true);
+
+                if (result.Succeeded)
+                {
+                    _logger.LogInformation("User logged in.");
+                    
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    return LocalRedirect(returnUrl);
+                }
+                
+                if (result.RequiresTwoFactor)
+                {
+                    _logger.LogInformation("User requires two-factor authentication.");
+                    
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    return RedirectToAction(nameof(LoginWith2fa), new { returnUrl, model.RememberMe });
+                }
+                
+                if (result.IsLockedOut)
+                {
+                    _logger.LogWarning("User account locked out.");
+                    
+                    // Apply consistent timing
+                    await Task.Delay(GetConsistentDelay(startTime));
+                    
+                    return RedirectToAction(nameof(Lockout));
+                }
+                
+                // Failed login - log the attempt
+                _logger.LogWarning("Invalid login attempt for user: {Email}", model.Email);
+                
+                // Apply consistent timing
+                await Task.Delay(GetConsistentDelay(startTime));
+                
+                ModelState.AddModelError(string.Empty, "Invalid login attempt.");
+                return View(model);
+            }
+
+            // If we got this far, something failed, redisplay form
+            return View(model);
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> LoginWith2fa(bool rememberMe, string returnUrl = null)
+        {
+            // Ensure the user has gone through the username & password screen first
+            var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+
+            if (user == null)
+            {
+                throw new InvalidOperationException("Unable to load two-factor authentication user.");
+            }
+
+            var model = new LoginWith2faViewModel { RememberMe = rememberMe };
+            return View(model);
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> LoginWith2fa(LoginWith2faViewModel model, bool rememberMe, string returnUrl = null)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            returnUrl ??= Url.Content("~/");
+
+            // Record start time for consistent timing
+            var startTime = DateTime.UtcNow;
+
+            var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+            if (user == null)
+            {
+                throw new InvalidOperationException("Unable to load two-factor authentication user.");
+            }
+
+            // Clean and normalize the code
+            var authenticatorCode = model.TwoFactorCode.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+            // Sign in with the authenticator code
+            var result = await _signInManager.TwoFactorAuthenticatorSignInAsync(
+                authenticatorCode, rememberMe, model.RememberDevice);
+
+            if (result.Succeeded)
+            {
+                _logger.LogInformation("User with ID '{UserId}' logged in with 2fa.", user.Id);
+                
+                // Apply consistent timing
+                await Task.Delay(GetConsistentDelay(startTime));
+                
+                return LocalRedirect(returnUrl);
+            }
+            
+            if (result.IsLockedOut)
+            {
+                _logger.LogWarning("User with ID '{UserId}' account locked out.", user.Id);
+                
+                // Apply consistent timing
+                await Task.Delay(GetConsistentDelay(startTime));
+                
+                return RedirectToAction(nameof(Lockout));
+            }
+            
+            // Failed login - log the attempt
+            _logger.LogWarning("Invalid authenticator code entered for user with ID '{UserId}'.", user.Id);
+            
+            // Apply consistent timing
+            await Task.Delay(GetConsistentDelay(startTime));
+            
+            ModelState.AddModelError(string.Empty, "Invalid authenticator code.");
+            return View(model);
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> LoginWithRecoveryCode(string returnUrl = null)
+        {
+            // Ensure the user has gone through the username & password screen first
+            var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+            if (user == null)
+            {
+                throw new InvalidOperationException("Unable to load two-factor authentication user.");
+            }
+
+            return View();
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> LoginWithRecoveryCode(LoginWithRecoveryCodeViewModel model, string returnUrl = null)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            // Record start time for consistent timing
+            var startTime = DateTime.UtcNow;
+
+            var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+            if (user == null)
+            {
+                throw new InvalidOperationException("Unable to load two-factor authentication user.");
+            }
+
+            // Clean and normalize the recovery code
+            var recoveryCode = model.RecoveryCode.Replace(" ", string.Empty);
+
+            // Sign in with the recovery code
+            var result = await _signInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
+
+            if (result.Succeeded)
+            {
+                _logger.LogInformation("User with ID '{UserId}' logged in with a recovery code.", user.Id);
+                
+                // Apply consistent timing
+                await Task.Delay(GetConsistentDelay(startTime));
+                
+                return LocalRedirect(returnUrl ?? Url.Content("~/"));
+            }
+            
+            if (result.IsLockedOut)
+            {
+                _logger.LogWarning("User with ID '{UserId}' account locked out.", user.Id);
+                
+                // Apply consistent timing
+                await Task.Delay(GetConsistentDelay(startTime));
+                
+                return RedirectToAction(nameof(Lockout));
+            }
+            
+            // Failed login - log the attempt
+            _logger.LogWarning("Invalid recovery code entered for user with ID '{UserId}'", user.Id);
+            
+            // Apply consistent timing
+            await Task.Delay(GetConsistentDelay(startTime));
+            
+            ModelState.AddModelError(string.Empty, "Invalid recovery code entered.");
+            return View();
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public IActionResult Lockout()
+        {
+            return View();
+        }
+
+        private int GetConsistentDelay(DateTime startTime)
+        {
+            // Aim for a consistent response time of 1 second
+            const int targetResponseTimeMs = 1000;
+            
+            var elapsed = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+            var delayMs = Math.Max(0, targetResponseTimeMs - elapsed);
+            
+            return delayMs;
+        }
+    }
+
+    // View Models
+    public class SetupMfaViewModel
+    {
+        [Required]
+        [StringLength(7, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Text)]
+        [Display(Name = "Verification Code")]
+        public string Code { get; set; }
+
+        [Display(Name = "Secret Key")]
+        public string AuthenticatorKey { get; set; }
+        
+        public string QrCodeUrl { get; set; }
+    }
+
+    public class RecoveryCodesViewModel
+    {
+        public string[] RecoveryCodes { get; set; }
+    }
+
+    public class ManageMfaViewModel
+    {
+        public bool IsMfaEnabled { get; set; }
+        public int RecoveryCodesLeft { get; set; }
+    }
+
+    public class ConfirmDisableMfaViewModel
+    {
+        [Required]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; }
+    }
+
+    public class LoginViewModel
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; }
+
+        [Required]
+        [DataType(DataType.Password)]
+        public string Password { get; set; }
+
+        [Display(Name = "Remember me")]
+        public bool RememberMe { get; set; }
+    }
+
+    public class LoginWith2faViewModel
+    {
+        [Required]
+        [StringLength(7, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Text)]
+        [Display(Name = "Authenticator code")]
+        public string TwoFactorCode { get; set; }
+
+        [Display(Name = "Remember this device")]
+        public bool RememberDevice { get; set; }
+
+        public bool RememberMe { get; set; }
+    }
+
+    public class LoginWithRecoveryCodeViewModel
+    {
+        [Required]
+        [DataType(DataType.Text)]
+        [Display(Name = "Recovery Code")]
+        public string RecoveryCode { get; set; }
+    }
+
+    // Razor Views
+    // Setup.cshtml:
+    /*
+    @model SetupMfaViewModel
+    
+    <h4>Configure Authenticator App</h4>
+    <div class="alert alert-info">
+        To use an authenticator app, follow these steps:
+        <ol>
+            <li>
+                Download an authenticator app like Microsoft Authenticator,
+                Google Authenticator, or Authy.
+            </li>
+            <li>
+                Scan the QR Code below or enter the key manually:
+                <code>@Model.AuthenticatorKey</code>
+            </li>
+            <li>
+                Once you have scanned the QR code or entered the key,
+                your authenticator app will provide you with a unique code.
+                Enter the code below to verify setup.
+            </li>
+        </ol>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-8">
+            <form id="mfa-setup-form" method="post">
+                <div class="form-group">
+                    <div class="qr-code-container my-3 text-center">
+                        <img src="@Model.QrCodeUrl" alt="QR Code" />
+                    </div>
+                </div>
+    
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group">
+                    <label asp-for="Code" class="control-label"></label>
+                    <input asp-for="Code" class="form-control" autocomplete="off" autofocus />
+                    <span asp-validation-for="Code" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Verify</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    @section Scripts {
+        <partial name="_ValidationScriptsPartial" />
+    }
+    */
+
+    // SetupComplete.cshtml:
+    /*
+    @model RecoveryCodesViewModel
+    
+    <h4>MFA Setup Complete</h4>
+    <div class="alert alert-success">
+        <p>
+            <strong>Your authenticator app has been verified.</strong>
+        </p>
+        <p>
+            Keep these recovery codes in a secure location.
+            You can use them to recover access to your account if you lose your authenticator device.
+        </p>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Recovery Codes</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group">
+                        @foreach (var code in Model.RecoveryCodes)
+                        {
+                            <li class="list-group-item font-monospace">@code</li>
+                        }
+                    </ul>
+                </div>
+                <div class="card-footer">
+                    <a asp-action="Manage" class="btn btn-primary">Done</a>
+                    <a href="#" onclick="window.print();" class="btn btn-secondary">Print</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    */
+
+    // Manage.cshtml:
+    /*
+    @model ManageMfaViewModel
+    
+    <h4>Manage Two-Factor Authentication</h4>
+    
+    @if (Model.IsMfaEnabled)
+    {
+        <div class="alert alert-success">
+            <p>
+                <strong>Two-factor authentication is enabled.</strong>
+            </p>
+            <p>
+                You have @Model.RecoveryCodesLeft recovery codes left.
+                @if (Model.RecoveryCodesLeft <= 3)
+                {
+                    <span class="text-danger">You should generate new recovery codes.</span>
+                }
+            </p>
+        </div>
+        <div class="row">
+            <div class="col-md-8">
+                <form method="post" asp-action="GenerateRecoveryCodes">
+                    <button type="submit" class="btn btn-primary">Generate new recovery codes</button>
+                </form>
+                <hr />
+                <form method="post" asp-action="Disable">
+                    <button type="submit" class="btn btn-danger">Disable two-factor authentication</button>
+                </form>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-warning">
+            <p>
+                <strong>Two-factor authentication is not enabled.</strong>
+            </p>
+            <p>
+                Adding a second authentication factor provides extra security by requiring
+                more than just a password to sign in.
+            </p>
+        </div>
+        <div>
+            <a asp-action="Setup" class="btn btn-primary">Set up authenticator app</a>
+        </div>
+    }
+    */
+
+    // LoginWith2fa.cshtml:
+    /*
+    @model LoginWith2faViewModel
+    
+    <h4>Two-factor authentication</h4>
+    <p>Your login is protected with an authenticator app. Enter your authenticator code below.</p>
+    <div class="row">
+        <div class="col-md-4">
+            <form method="post" asp-route-returnUrl="@ViewData["ReturnUrl"]">
+                <input asp-for="RememberMe" type="hidden" />
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group">
+                    <label asp-for="TwoFactorCode"></label>
+                    <input asp-for="TwoFactorCode" class="form-control" autocomplete="off" autofocus />
+                    <span asp-validation-for="TwoFactorCode" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox">
+                        <label asp-for="RememberDevice">
+                            <input asp-for="RememberDevice" />
+                            @Html.DisplayNameFor(m => m.RememberDevice)
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Verify</button>
+                </div>
+                <p>
+                    <a asp-action="LoginWithRecoveryCode" asp-route-returnUrl="@ViewData["ReturnUrl"]">
+                        Lost access to your authenticator device?
+                    </a>
+                </p>
+            </form>
+        </div>
+    </div>
+    
+    @section Scripts {
+        <partial name="_ValidationScriptsPartial" />
+    }
+    */
+}
+```
+
+## Secure Authentication Logging
+
+@implementation {
+    "languages": ["dotnet"],
+    "rule": "Implement secure authentication logging that records authentication events without storing sensitive information like passwords or tokens. Use consistent response times to prevent timing attacks."
+}
+
+#### ASP.NET Core Example
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Diagnostics;
+using System.Security.Claims;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.Net.Http.Headers;
+using System.IO;
+using System.Collections.Generic;
+
+namespace SecureApp
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Add custom logging service
+            services.AddSingleton<ISecureLogger, SecureLogger>();
+            
+            // Add authentication configuration
+            services.AddIdentity<ApplicationUser, IdentityRole>()
+                .AddEntityFrameworkStores<ApplicationDbContext>()
+                .AddDefaultTokenProviders();
+                
+            // Add authentication provider logging
+            services.AddScoped<IUserClaimsPrincipalFactory<ApplicationUser>, AuditingUserClaimsPrincipalFactory>();
+            
+            services.AddControllersWithViews();
+            
+            // Configure rate limiting through a third-party library like AspNetCoreRateLimit
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ISecureLogger secureLogger)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                // Custom error handler that logs errors securely
+                app.UseExceptionHandler(errorApp =>
+                {
+                    errorApp.Run(async context =>
+                    {
+                        var exceptionHandlerPathFeature =
+                            context.Features.Get<IExceptionHandlerPathFeature>();
+                        var exception = exceptionHandlerPathFeature?.Error;
+                        
+                        // Log the error with secure context
+                        secureLogger.LogError(
+                            "Unhandled exception",
+                            new Dictionary<string, object>
+                            {
+                                ["path"] = context.Request.Path,
+                                ["userId"] = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                            },
+                            exception);
+                            
+                        // Return a generic error page
+                        context.Response.StatusCode = 500;
+                        context.Response.ContentType = "text/html";
+                        await context.Response.WriteAsync("<h1>An error occurred</h1>");
+                    });
+                });
+                
+                app.UseHsts();
+            }
+
+            app.UseHttpsRedirection();
+            app.UseStaticFiles();
+
+            // Add authentication timing middleware
+            app.UseMiddleware<AuthenticationTimingMiddleware>();
+
+            app.UseRouting();
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            // Add security response headers
+            app.Use(async (context, next) =>
+            {
+                // Add security headers
+                context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
+                context.Response.Headers.Add("X-Frame-Options", "DENY");
+                context.Response.Headers.Add("X-XSS-Protection", "1; mode=block");
+                context.Response.Headers.Add("Referrer-Policy", "strict-origin-when-cross-origin");
+                
+                await next();
+            });
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+    }
+
+    // Interface for secure logging
+    public interface ISecureLogger
+    {
+        void LogInfo(string message, Dictionary<string, object> context = null);
+        void LogWarning(string message, Dictionary<string, object> context = null);
+        void LogError(string message, Dictionary<string, object> context = null, Exception exception = null);
+        void LogAuthenticationEvent(string eventType, string username, bool success, string ipAddress, Dictionary<string, object> additionalData = null);
+    }
+
+    // Secure logger implementation
+    public class SecureLogger : ISecureLogger
+    {
+        private readonly ILogger<SecureLogger> _logger;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public SecureLogger(
+            ILogger<SecureLogger> logger,
+            IHttpContextAccessor httpContextAccessor)
+        {
+            _logger = logger;
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        public void LogInfo(string message, Dictionary<string, object> context = null)
+        {
+            LogWithLevel(LogLevel.Information, message, context);
+        }
+
+        public void LogWarning(string message, Dictionary<string, object> context = null)
+        {
+            LogWithLevel(LogLevel.Warning, message, context);
+        }
+
+        public void LogError(string message, Dictionary<string, object> context = null, Exception exception = null)
+        {
+            context = context ?? new Dictionary<string, object>();
+
+            if (exception != null)
+            {
+                context["exceptionType"] = exception.GetType().Name;
+                context["exceptionMessage"] = exception.Message;
+                
+                // Don't include stack trace or other sensitive details in production
+                if (_httpContextAccessor.HttpContext?.RequestServices
+                    .GetService<IWebHostEnvironment>()?.IsDevelopment() == true)
+                {
+                    context["stackTrace"] = exception.StackTrace;
+                }
+            }
+
+            LogWithLevel(LogLevel.Error, message, context);
+        }
+
+        public void LogAuthenticationEvent(string eventType, string username, bool success, string ipAddress, Dictionary<string, object> additionalData = null)
+        {
+            var context = new Dictionary<string, object>
+            {
+                ["eventType"] = eventType,
+                ["timestamp"] = DateTime.UtcNow.ToString("o"),
+                ["ipAddress"] = ipAddress ?? _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString()
+            };
+
+            if (!string.IsNullOrEmpty(username))
+            {
+                context["username"] = username;
+            }
+
+            context["success"] = success;
+
+            // Add browser information
+            if (_httpContextAccessor.HttpContext != null)
+            {
+                context["userAgent"] = _httpContextAccessor.HttpContext.Request.Headers[HeaderNames.UserAgent].ToString();
+            }
+
+            // Add additional data if provided
+            if (additionalData != null)
+            {
+                foreach (var kvp in additionalData)
+                {
+                    // Skip sensitive data fields
+                    if (IsSensitiveField(kvp.Key))
+                    {
+                        continue;
+                    }
+                    
+                    // Sanitize potential sensitive values
+                    context[kvp.Key] = SanitizeValue(kvp.Key, kvp.Value);
+                }
+            }
+
+            LogWithLevel(success ? LogLevel.Information : LogLevel.Warning, $"Authentication {eventType}", context);
+        }
+
+        private void LogWithLevel(LogLevel level, string message, Dictionary<string, object> context)
+        {
+            context = context ?? new Dictionary<string, object>();
+
+            // Add basic context information if available
+            if (_httpContextAccessor.HttpContext != null)
+            {
+                var httpContext = _httpContextAccessor.HttpContext;
+                
+                // Add request path
+                if (!context.ContainsKey("path"))
+                {
+                    context["path"] = httpContext.Request.Path;
+                }
+                
+                // Add correlation ID if available
+                if (httpContext.TraceIdentifier != null && !context.ContainsKey("correlationId"))
+                {
+                    context["correlationId"] = httpContext.TraceIdentifier;
+                }
+                
+                // Add user ID if authenticated and not already present
+                if (httpContext.User?.Identity?.IsAuthenticated == true && !context.ContainsKey("userId"))
+                {
+                    var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+                    if (!string.IsNullOrEmpty(userId))
+                    {
+                        context["userId"] = userId;
+                    }
+                }
+            }
+
+            // Serialize context to JSON for structured logging
+            string contextJson = context.Count > 0 ? JsonSerializer.Serialize(context) : null;
+
+            // Log with appropriate level
+            switch (level)
+            {
+                case LogLevel.Information:
+                    _logger.LogInformation("{Message} {Context}", message, contextJson);
+                    break;
+                case LogLevel.Warning:
+                    _logger.LogWarning("{Message} {Context}", message, contextJson);
+                    break;
+                case LogLevel.Error:
+                    _logger.LogError("{Message} {Context}", message, contextJson);
+                    break;
+                default:
+                    _logger.Log(level, "{Message} {Context}", message, contextJson);
+                    break;
+            }
+        }
+
+        private bool IsSensitiveField(string fieldName)
+        {
+            var sensitiveFields = new[]
+            {
+                "password", "token", "secret", "credential", "key", "apikey", "api_key",
+                "authorization", "cookie", "session", "pin", "code", "cvv", "ssn", "credit"
+            };
+
+            foreach (var sensitiveField in sensitiveFields)
+            {
+                if (fieldName.IndexOf(sensitiveField, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private object SanitizeValue(string fieldName, object value)
+        {
+            if (value == null)
+                return null;
+
+            // Check if it's a sensitive field and mask it
+            if (IsSensitiveField(fieldName))
+            {
+                return "[REDACTED]";
+            }
+
+            // For other values, return as is, but ensure no sensitive data
+            if (value is string stringValue)
+            {
+                // Check for potential sensitive patterns like SSN, credit card numbers
+                if (ContainsSensitivePattern(stringValue))
+                {
+                    return "[FILTERED]";
+                }
+            }
+
+            return value;
+        }
+
+        private bool ContainsSensitivePattern(string value)
+        {
+            // Check for credit card pattern (simplified)
+            if (Regex.IsMatch(value, @"\b(?:\d[ -]*?){13,16}\b"))
+                return true;
+
+            // Check for SSN pattern (simplified)
+            if (Regex.IsMatch(value, @"\b\d{3}[- ]?\d{2}[- ]?\d{4}\b"))
+                return true;
+
+            // Add more patterns as needed
+
+            return false;
+        }
+    }
+
+    // Authentication timing middleware
+    public class AuthenticationTimingMiddleware
+    {
+        private readonly RequestDelegate _next;
+        private readonly ISecureLogger _secureLogger;
+
+        public AuthenticationTimingMiddleware(
+            RequestDelegate next,
+            ISecureLogger secureLogger)
+        {
+            _next = next;
+            _secureLogger = secureLogger;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            var isAuthEndpoint = IsAuthenticationEndpoint(context.Request.Path);
+            var sw = Stopwatch.StartNew();
+
+            try
+            {
+                // Process the request
+                await _next(context);
+            }
+            finally
+            {
+                sw.Stop();
+
+                // For authentication endpoints, ensure consistent timing
+                if (isAuthEndpoint)
+                {
+                    // Log the authentication request timing
+                    _secureLogger.LogInfo("Authentication endpoint timing",
+                        new Dictionary<string, object>
+                        {
+                            ["path"] = context.Request.Path,
+                            ["method"] = context.Request.Method,
+                            ["statusCode"] = context.Response.StatusCode,
+                            ["elapsedMs"] = sw.ElapsedMilliseconds
+                        });
+
+                    // Add delay if needed to reach minimum response time
+                    const int minimumResponseTimeMs = 1000; // 1 second minimum
+                    
+                    var remainingTimeMs = minimumResponseTimeMs - (int)sw.ElapsedMilliseconds;
+                    if (remainingTimeMs > 0)
+                    {
+                        await Task.Delay(remainingTimeMs);
+                    }
+                }
+            }
+        }
+
+        private bool IsAuthenticationEndpoint(PathString path)
+        {
+            // Check if the path is related to authentication
+            return path.StartsWithSegments("/Account/Login") ||
+                   path.StartsWithSegments("/Account/Register") ||
+                   path.StartsWithSegments("/Account/ForgotPassword") ||
+                   path.StartsWithSegments("/Account/ResetPassword") ||
+                   path.StartsWithSegments("/Account/LoginWith2fa") ||
+                   path.StartsWithSegments("/Account/ExternalLogin") ||
+                   path.StartsWithSegments("/Identity/Account");
+        }
+    }
+
+    // Custom claims principal factory that logs authentication events
+    public class AuditingUserClaimsPrincipalFactory : UserClaimsPrincipalFactory<ApplicationUser, IdentityRole>
+    {
+        private readonly ISecureLogger _secureLogger;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public AuditingUserClaimsPrincipalFactory(
+            UserManager<ApplicationUser> userManager,
+            RoleManager<IdentityRole> roleManager,
+            IOptions<IdentityOptions> optionsAccessor,
+            ISecureLogger secureLogger,
+            IHttpContextAccessor httpContextAccessor)
+            : base(userManager, roleManager, optionsAccessor)
+        {
+            _secureLogger = secureLogger;
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        public override async Task<ClaimsPrincipal> CreateAsync(ApplicationUser user)
+        {
+            // Create the claims principal
+            var principal = await base.CreateAsync(user);
+
+            // Log successful authentication
+            if (principal.Identity.IsAuthenticated)
+            {
+                var ipAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+                
+                _secureLogger.LogAuthenticationEvent(
+                    "authentication_success",
+                    user.UserName,
+                    true,
+                    ipAddress,
+                    new Dictionary<string, object>
+                    {
+                        ["userId"] = user.Id,
+                        ["emailConfirmed"] = user.EmailConfirmed,
+                        ["lockoutEnabled"] = user.LockoutEnabled,
+                        ["twoFactorEnabled"] = user.TwoFactorEnabled
+                    });
+            }
+
+            return principal;
+        }
+    }
+
+    // Authentication controller with secure logging
+    public class AccountController : Controller
+    {
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly ISecureLogger _secureLogger;
+
+        public AccountController(
+            UserManager<ApplicationUser> userManager,
+            SignInManager<ApplicationUser> signInManager,
+            ISecureLogger secureLogger)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _secureLogger = secureLogger;
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginViewModel model, string returnUrl = null)
+        {
+            returnUrl ??= Url.Content("~/");
+
+            // Record start time to ensure consistent response timing
+            var startTime = DateTime.UtcNow;
+
+            if (ModelState.IsValid)
+            {
+                try
+                {
+                    // Check if username/email exists without revealing which one is wrong
+                    var username = model.Email; // Assuming model.Email could be username or email
+                    var user = await _userManager.FindByEmailAsync(username) ??
+                               await _userManager.FindByNameAsync(username);
+
+                    if (user != null)
+                    {
+                        // Check if account is locked out
+                        if (await _userManager.IsLockedOutAsync(user))
+                        {
+                            _secureLogger.LogAuthenticationEvent(
+                                "login_attempt",
+                                username,
+                                false,
+                                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                                new Dictionary<string, object>
+                                {
+                                    ["reason"] = "account_locked",
+                                    ["userId"] = user.Id
+                                });
+
+                            // Ensure consistent timing
+                            await EnsureConsistentTiming(startTime);
+                            
+                            ModelState.AddModelError(string.Empty, "Account is locked. Please try again later.");
+                            return View(model);
+                        }
+
+                        // Attempt to sign in
+                        var result = await _signInManager.PasswordSignInAsync(user, model.Password, model.RememberMe, lockoutOnFailure: true);
+
+                        if (result.Succeeded)
+                        {
+                            _secureLogger.LogAuthenticationEvent(
+                                "login_success",
+                                username,
+                                true,
+                                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                                new Dictionary<string, object>
+                                {
+                                    ["userId"] = user.Id,
+                                    ["rememberMe"] = model.RememberMe
+                                });
+
+                            // Ensure consistent timing
+                            await EnsureConsistentTiming(startTime);
+                            
+                            return LocalRedirect(returnUrl);
+                        }
+                        
+                        if (result.RequiresTwoFactor)
+                        {
+                            _secureLogger.LogAuthenticationEvent(
+                                "login_require_2fa",
+                                username,
+                                true,
+                                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                                new Dictionary<string, object>
+                                {
+                                    ["userId"] = user.Id
+                                });
+
+                            // Ensure consistent timing
+                            await EnsureConsistentTiming(startTime);
+                            
+                            return RedirectToAction(nameof(LoginWith2fa), new { returnUrl, model.RememberMe });
+                        }
+                        
+                        if (result.IsLockedOut)
+                        {
+                            _secureLogger.LogAuthenticationEvent(
+                                "login_lockout",
+                                username,
+                                false,
+                                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                                new Dictionary<string, object>
+                                {
+                                    ["userId"] = user.Id
+                                });
+
+                            // Ensure consistent timing
+                            await EnsureConsistentTiming(startTime);
+                            
+                            return RedirectToAction(nameof(Lockout));
+                        }
+                        
+                        // If we get here, the password was incorrect
+                        _secureLogger.LogAuthenticationEvent(
+                            "login_failed",
+                            username,
+                            false,
+                            HttpContext.Connection.RemoteIpAddress?.ToString(),
+                            new Dictionary<string, object>
+                            {
+                                ["userId"] = user.Id,
+                                ["reason"] = "invalid_password"
+                            });
+                    }
+                    else
+                    {
+                        // User not found
+                        _secureLogger.LogAuthenticationEvent(
+                            "login_failed",
+                            username,
+                            false,
+                            HttpContext.Connection.RemoteIpAddress?.ToString(),
+                            new Dictionary<string, object>
+                            {
+                                ["reason"] = "user_not_found"
+                            });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log any unexpected errors during login
+                    _secureLogger.LogError(
+                        "login_error",
+                        new Dictionary<string, object>
+                        {
+                            ["username"] = model.Email
+                        },
+                        ex);
+                }
+
+                // Ensure consistent timing
+                await EnsureConsistentTiming(startTime);
+                
+                // Always return the same generic error message
+                ModelState.AddModelError(string.Empty, "Invalid login attempt.");
+                return View(model);
+            }
+
+            // If we got this far, something failed, redisplay form
+            return View(model);
+        }
+
+        private async Task EnsureConsistentTiming(DateTime startTime)
+        {
+            // Ensure all authentication responses take at least 1 second
+            var elapsedMs = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+            var minimumResponseTimeMs = 1000; // 1 second
+            
+            if (elapsedMs < minimumResponseTimeMs)
+            {
+                await Task.Delay(minimumResponseTimeMs - elapsedMs);
+            }
+        }
+    }
+
+    // Supporting classes
+    public class ApplicationUser : IdentityUser
+    {
+        // Add custom user properties if needed
+    }
+
+    public class ApplicationDbContext : DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
+    }
+
+    public class LoginViewModel
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; }
+
+        [Required]
+        [DataType(DataType.Password)]
+        public string Password { get; set; }
+
+        [Display(Name = "Remember me?")]
+        public bool RememberMe { get; set; }
+    }
+}
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "weak_password_policies",
+        "wrong": "Using complex composition requirements (e.g., requiring special characters, numbers) with short minimum lengths",
+        "correct": "Enforcing longer passwords (12+ characters) with fewer composition requirements",
+        "reason": "Short passwords with special character requirements often lead to predictable patterns, while longer passwords provide better security"
+    },
+    {
+        "id": "knowledge_based_recovery",
+        "wrong": "Implementing security questions for account recovery",
+        "correct": "Using email verification, backup codes, or secondary contact methods",
+        "reason": "Security questions are often easily guessed or researched, especially in the age of social media"
+    },
+    {
+        "id": "constant_timing_issues",
+        "wrong": "Different response times for success vs. failure cases in authentication flows",
+        "correct": "Implementing consistent response timing across all authentication operations",
+        "reason": "Timing differences can be exploited to determine if usernames exist or passwords are partially correct"
+    },
+    {
+        "id": "insecure_password_fields",
+        "wrong": "Non-standard password fields that break password managers",
+        "correct": "Using standard form elements with proper autocomplete attributes",
+        "reason": "Password managers help users create and use strong unique passwords"
+    },
+    {
+        "id": "mfa_bypass",
+        "wrong": "Allowing critical operations without re-verifying MFA",
+        "correct": "Requiring MFA re-verification for sensitive operations (e.g., disabling MFA, changing email)",
+        "reason": "MFA should be verified for all sensitive operations, not just login"
+    },
+    {
+        "id": "logging_sensitive_data",
+        "wrong": "Including passwords, tokens, or session IDs in log entries",
+        "correct": "Never logging sensitive authentication data, even in debug logs",
+        "reason": "Logs are often accessible to more people and may persist longer than expected"
+    },
+    {
+        "id": "unsuitable_identity_configuration",
+        "wrong": "Using default ASP.NET Core Identity settings without review",
+        "correct": "Explicitly configuring Identity options based on modern security standards",
+        "reason": "Default settings may not align with your security requirements and can be too permissive"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+- [NIST Special Publication 800-63B: Digital Identity Guidelines (Authentication)](https://pages.nist.gov/800-63-3/sp800-63b.html)
+- [Microsoft Identity and Access Management](https://docs.microsoft.com/en-us/aspnet/core/security/authentication/identity)
+- [ASP.NET Core Authorization](https://docs.microsoft.com/en-us/aspnet/core/security/authorization/introduction)
+- [Microsoft Multi-factor Authentication Documentation](https://docs.microsoft.com/en-us/aspnet/core/security/authentication/mfa)
+- [ASP.NET Core Data Protection](https://docs.microsoft.com/en-us/aspnet/core/security/data-protection/introduction)
+
+@version "1.0.0"
+@last_updated "2024-05-01"
