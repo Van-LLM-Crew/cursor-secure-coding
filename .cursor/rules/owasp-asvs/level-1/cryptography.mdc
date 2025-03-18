@@ -1,0 +1,367 @@
+---
+description: OWASP ASVS Level 1 requirements for secure cryptography implementation
+globs: ["**/*.{js,jsx,ts,tsx,py}"]
+---
+
+# Cryptography Security (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V6 - Stored Cryptography"
+}
+
+## Overview
+
+Cryptography is essential for protecting sensitive data, but improper implementation can lead to false security. Level 1 cryptography requirements focus on the baseline cryptographic practices that all applications should follow to protect sensitive data.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v6.2.1",
+        "severity": "critical",
+        "description": "All cryptographic modules must fail securely, and errors must be handled in a way that does not enable oracle padding attacks",
+        "verification": "Verify that all cryptographic functions used to protect secrets from the application user fail securely"
+    },
+    {
+        "id": "v6.2.2",
+        "severity": "critical",
+        "description": "Industry proven or government approved cryptographic algorithms, modes, and libraries must be used, instead of custom coded cryptography",
+        "verification": "Verify that industry proven or government approved cryptographic algorithms, modes, and libraries are used"
+    },
+    {
+        "id": "v6.2.3",
+        "severity": "critical",
+        "description": "Encryption initialization vector, cipher configuration, and block modes must be configured securely using the latest advice",
+        "verification": "Verify that encryption initialization vectors, cipher configuration, and block modes are configured securely"
+    },
+    {
+        "id": "v6.2.5",
+        "severity": "critical",
+        "description": "Random number, encryption, or hashing algorithms must have appropriate parameters or seeds to ensure output cannot be predicted",
+        "verification": "Verify that random number, encryption or hashing algorithms are not used as a sole method of password hashing"
+    }
+]
+
+## Implementation Guidelines
+
+### Secure Encryption
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Use established encryption libraries and algorithms. Never implement your own cryptography. Use strong keys and initialization vectors."
+}
+
+#### JavaScript Example (with Node.js)
+
+```javascript
+const crypto = require('crypto');
+
+// INSECURE: Using weak algorithm (DES)
+function encryptInsecure(data, key) {
+    // NEVER DO THIS!
+    const cipher = crypto.createCipheriv('des', key, Buffer.alloc(8, 0));
+    let encrypted = cipher.update(data, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted;
+}
+
+// INSECURE: Hardcoded IV
+function encryptWithHardcodedIV(data, key) {
+    // NEVER DO THIS!
+    const iv = Buffer.from('0000000000000000', 'hex'); // Hardcoded IV
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    let encrypted = cipher.update(data, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted;
+}
+
+// SECURE: Using strong algorithm with random IV
+function encryptSecure(data, key) {
+    // Generate a random initialization vector
+    const iv = crypto.randomBytes(16);
+    
+    // Create cipher using AES-256-GCM (authenticated encryption)
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    
+    // Encrypt the data
+    let encrypted = cipher.update(data, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    
+    // Get the auth tag
+    const authTag = cipher.getAuthTag().toString('hex');
+    
+    // Return IV, encrypted data, and auth tag
+    return {
+        iv: iv.toString('hex'),
+        encrypted: encrypted,
+        authTag: authTag
+    };
+}
+
+// SECURE: Decryption with proper error handling
+function decryptSecure(encryptedData, key) {
+    try {
+        const iv = Buffer.from(encryptedData.iv, 'hex');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        
+        // Set auth tag
+        decipher.setAuthTag(Buffer.from(encryptedData.authTag, 'hex'));
+        
+        // Decrypt the data
+        let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        
+        return decrypted;
+    } catch (error) {
+        // Handle errors securely - don't expose detailed error information
+        console.error('Decryption failed (internal):', error);
+        throw new Error('Decryption failed');
+    }
+}
+
+// SECURE: Generate a strong encryption key
+function generateEncryptionKey() {
+    // Generate a random 32-byte (256-bit) key
+    return crypto.randomBytes(32);
+}
+```
+
+#### Python Example
+
+```python
+import os
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.backends import default_backend
+from base64 import b64encode, b64decode
+
+# INSECURE: Using weak algorithm (DES)
+def encrypt_insecure(data, key):
+    # NEVER DO THIS!
+    from Crypto.Cipher import DES  # Using old pycrypto library
+    cipher = DES.new(key, DES.MODE_ECB)  # ECB mode is also insecure
+    padded_data = data + (8 - len(data) % 8) * chr(8 - len(data) % 8)
+    return cipher.encrypt(padded_data.encode())
+
+# INSECURE: Hardcoded IV
+def encrypt_with_hardcoded_iv(data, key):
+    # NEVER DO THIS!
+    iv = b'0000000000000000'  # Hardcoded IV
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    
+    padder = padding.PKCS7(128).padder()
+    padded_data = padder.update(data.encode()) + padder.finalize()
+    
+    return encryptor.update(padded_data) + encryptor.finalize()
+
+# SECURE: Using strong algorithm with random IV
+def encrypt_secure(data, key):
+    # Generate a random 16-byte IV
+    iv = os.urandom(16)
+    
+    # Create an encryptor object using AES-GCM mode
+    cipher = Cipher(
+        algorithms.AES(key),
+        modes.GCM(iv),
+        backend=default_backend()
+    )
+    encryptor = cipher.encryptor()
+    
+    # Encrypt the data
+    ciphertext = encryptor.update(data.encode()) + encryptor.finalize()
+    
+    # Return IV, ciphertext, and authentication tag
+    return {
+        'iv': b64encode(iv).decode('utf-8'),
+        'ciphertext': b64encode(ciphertext).decode('utf-8'),
+        'tag': b64encode(encryptor.tag).decode('utf-8')
+    }
+
+# SECURE: Decryption with proper error handling
+def decrypt_secure(encrypted_data, key):
+    try:
+        # Decode the base64 encoded values
+        iv = b64decode(encrypted_data['iv'])
+        ciphertext = b64decode(encrypted_data['ciphertext'])
+        tag = b64decode(encrypted_data['tag'])
+        
+        # Create a decryptor object
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.GCM(iv, tag),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        
+        # Decrypt the data
+        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+        
+        return plaintext.decode('utf-8')
+    except Exception as e:
+        # Handle errors securely - don't expose detailed error information
+        print(f"Decryption failed (internal): {str(e)}")
+        raise ValueError("Decryption failed")
+
+# SECURE: Generate a strong encryption key
+def generate_encryption_key():
+    # Generate a random 32-byte (256-bit) key
+    return os.urandom(32)
+```
+
+### Secure Random Number Generation
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Use cryptographically secure random number generators for security-critical operations like generating keys, tokens, and IVs."
+}
+
+#### JavaScript Example
+
+```javascript
+const crypto = require('crypto');
+
+// INSECURE: Using Math.random() for security purposes
+function generateTokenInsecure(length = 32) {
+    // NEVER DO THIS!
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let token = '';
+    
+    for (let i = 0; i < length; i++) {
+        const randomIndex = Math.floor(Math.random() * characters.length);
+        token += characters.charAt(randomIndex);
+    }
+    
+    return token;
+}
+
+// SECURE: Using cryptographically strong random values
+function generateTokenSecure(length = 32) {
+    return crypto.randomBytes(length).toString('hex');
+}
+
+// SECURE: Generate a random string with a specific character set
+function generateRandomString(length = 32, charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') {
+    // Get enough random bytes
+    const randomBytes = crypto.randomBytes(length);
+    const result = new Array(length);
+    
+    // Map random bytes to the character set
+    for (let i = 0; i < length; i++) {
+        result[i] = charset[randomBytes[i] % charset.length];
+    }
+    
+    return result.join('');
+}
+
+// SECURE: Generate a cryptographically secure random number within a range
+function getRandomInt(min, max) {
+    // Ensure we have an integer range
+    min = Math.ceil(min);
+    max = Math.floor(max);
+    
+    // Generate a random value with proper distribution
+    const range = max - min + 1;
+    const bytesNeeded = Math.ceil(Math.log2(range) / 8);
+    const cutoff = Math.floor((256 ** bytesNeeded) / range) * range;
+    
+    let randomBytes;
+    let randomValue;
+    
+    do {
+        randomBytes = crypto.randomBytes(bytesNeeded);
+        randomValue = 0;
+        
+        for (let i = 0; i < bytesNeeded; i++) {
+            randomValue = (randomValue << 8) | randomBytes[i];
+        }
+    } while (randomValue >= cutoff);
+    
+    return min + (randomValue % range);
+}
+```
+
+#### Python Example
+
+```python
+import os
+import secrets
+import random
+
+# INSECURE: Using standard random module for security purposes
+def generate_token_insecure(length=32):
+    # NEVER DO THIS!
+    characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    return ''.join(random.choice(characters) for _ in range(length))
+
+# SECURE: Using the secrets module for cryptographically strong random values
+def generate_token_secure(length=32):
+    # Use token_hex from secrets module
+    return secrets.token_hex(length // 2)  # Each byte becomes 2 hex chars
+
+# SECURE: Generate a random string with a specific character set
+def generate_random_string(length=32, charset="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"):
+    return ''.join(secrets.choice(charset) for _ in range(length))
+
+# SECURE: Generate a cryptographically secure random number within a range
+def get_random_int(min_val, max_val):
+    # Ensure we have integer values
+    min_val = int(min_val)
+    max_val = int(max_val)
+    
+    # Use secrets.randbelow for generating the random number
+    return min_val + secrets.randbelow(max_val - min_val + 1)
+
+# SECURE: Generate random bytes
+def generate_random_bytes(length=32):
+    return os.urandom(length)
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "custom_cryptography",
+        "wrong": "Implementing your own encryption algorithms or routines",
+        "correct": "Using established, well-tested libraries and algorithms",
+        "reason": "Custom cryptography almost always contains vulnerabilities that can be exploited"
+    },
+    {
+        "id": "weak_algorithms",
+        "wrong": "Using outdated or weak encryption algorithms (DES, MD5, etc.)",
+        "correct": "Using strong modern algorithms (AES-256, SHA-256 or better)",
+        "reason": "Weak algorithms can be broken through various cryptanalytic attacks"
+    },
+    {
+        "id": "insecure_random",
+        "wrong": "Using Math.random() or random.random() for security purposes",
+        "correct": "Using cryptographically secure RNGs (crypto.randomBytes or secrets module)",
+        "reason": "Standard random functions are predictable and can lead to token prediction or replay attacks"
+    },
+    {
+        "id": "hardcoded_secrets",
+        "wrong": "Hardcoding encryption keys, IVs, or secrets in source code",
+        "correct": "Using secure key management services and generating random IVs per operation",
+        "reason": "Hardcoded values can be extracted from source code or compiled applications"
+    },
+    {
+        "id": "insecure_modes",
+        "wrong": "Using insecure block cipher modes like ECB",
+        "correct": "Using secure modes like GCM or CBC with proper padding",
+        "reason": "Insecure modes can leak information about encrypted data patterns"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Cryptographic Storage Cheat Sheet](https://cheatsheatseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html)
+- [NIST Recommendations for Key Management](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-57pt1r5.pdf)
+- [OWASP Key Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html)
+- [Mozilla Web Security Guidelines - Cryptography](https://infosec.mozilla.org/guidelines/cryptography)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

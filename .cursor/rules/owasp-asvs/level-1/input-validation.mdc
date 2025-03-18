@@ -1,0 +1,276 @@
+---
+description: OWASP ASVS Level 1 requirements for input validation and sanitization to prevent injection attacks
+globs: ["**/*.{js,jsx,ts,tsx,py}"]
+---
+
+# Input Validation and Sanitization (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V5 - Validation, Sanitization and Encoding"
+}
+
+## Overview
+
+Input validation is the first line of defense against many injection attacks like SQL injection, XSS, command injection, and more.
+Level 1 requirements represent the minimum validation controls necessary for basic application security.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v5.1.1",
+        "severity": "critical",
+        "description": "Use a trusted input validation library for input handling rather than custom validation code",
+        "verification": "Verify that the application has defenses against HTTP parameter pollution attacks"
+    },
+    {
+        "id": "v5.2.1",
+        "severity": "critical",
+        "description": "All untrusted HTML input from WYSIWYG editors or similar is properly sanitized with an HTML sanitizer library or framework feature",
+        "verification": "Verify that all input is validated server-side"
+    },
+    {
+        "id": "v5.3.1",
+        "severity": "critical",
+        "description": "All SQL queries, HQL, OSQL, NoSQL and stored procedures are protected by the use of prepared statements or query parameterization",
+        "verification": "Verify that SQL injection is prevented by using parameterized queries"
+    },
+    {
+        "id": "v5.4.1",
+        "severity": "critical",
+        "description": "File and URL validations prevent path traversal attacks",
+        "verification": "Verify that the application is not vulnerable to path traversal attacks"
+    }
+]
+
+## Implementation Guidelines
+
+### SQL Injection Prevention
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Always use parameterized queries or prepared statements. Never concatenate user input directly into SQL strings."
+}
+
+#### JavaScript Example (with Node.js and MySQL)
+
+```javascript
+// INSECURE: Direct concatenation of user input
+function getUserInsecure(userId) {
+    const query = `SELECT * FROM users WHERE id = ${userId}`; // VULNERABLE!
+    return db.execute(query);
+}
+
+// SECURE: Using parameterized queries
+function getUserSecure(userId) {
+    const query = "SELECT * FROM users WHERE id = ?";
+    return db.execute(query, [userId]); // Safe parameterization
+}
+
+// SECURE: Using an ORM (Sequelize example)
+async function getUserWithORM(userId) {
+    return await User.findByPk(userId); // ORM handles parameterization
+}
+```
+
+#### Python Example (with SQLAlchemy and raw queries)
+
+```python
+# INSECURE: String formatting or concatenation
+def get_user_insecure(user_id):
+    query = f"SELECT * FROM users WHERE id = {user_id}"  # VULNERABLE!
+    return db.execute(query)
+
+# SECURE: Using parameterized queries
+def get_user_secure(user_id):
+    query = "SELECT * FROM users WHERE id = %s"  # MySQL style
+    return db.execute(query, (user_id,))  # Tuple of parameters
+
+# SECURE: Using ORM
+def get_user_with_orm(user_id):
+    return session.query(User).filter(User.id == user_id).first()  # SQLAlchemy ORM
+```
+
+### XSS Prevention
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Always encode/escape output data displayed in HTML, JavaScript, CSS, or URLs. Use context-appropriate encoding and consider using a template system with automatic escaping."
+}
+
+#### JavaScript Example
+
+```javascript
+// INSECURE: Directly inserting user input into HTML
+function displayUserCommentInsecure(comment) {
+    const commentSection = document.getElementById('comments');
+    commentSection.innerHTML += `<div>${comment}</div>`; // VULNERABLE to XSS!
+}
+
+// SECURE: Using DOM methods and textContent for automatic escaping
+function displayUserCommentSecure(comment) {
+    const commentSection = document.getElementById('comments');
+    const newComment = document.createElement('div');
+    newComment.textContent = comment; // Safe - automatically escaped
+    commentSection.appendChild(newComment);
+}
+
+// SECURE: Using a library for sanitization (DOMPurify)
+function displayRichUserComment(comment) {
+    const commentSection = document.getElementById('comments');
+    commentSection.innerHTML += DOMPurify.sanitize(comment); // Sanitizes HTML
+}
+```
+
+#### Python Example (with Flask)
+
+```python
+# INSECURE: Using string formatting in templates
+@app.route('/profile/<username>')
+def profile_insecure(username):
+    return f"""
+    <h1>Profile for {username}</h1>
+    """  # VULNERABLE to XSS!
+
+# SECURE: Using template engine with auto-escaping
+@app.route('/profile/<username>')
+def profile_secure(username):
+    return render_template('profile.html', username=username)  # Jinja2 escapes by default
+
+# SECURE: Explicit escaping with Markupsafe
+from markupsafe import escape
+
+@app.route('/profile/<username>')
+def profile_with_escape(username):
+    return f"""
+    <h1>Profile for {escape(username)}</h1>
+    """  # Explicitly escaped
+```
+
+### Path Traversal Prevention
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Validate file paths, normalize paths, and restrict file access to specific directories. Never use user input directly in file operations."
+}
+
+#### JavaScript Example (Node.js)
+
+```javascript
+const path = require('path');
+const fs = require('fs');
+
+// INSECURE: Directly using user input in file paths
+function getFileInsecure(fileName) {
+    const filePath = `./resources/${fileName}`;  // VULNERABLE to path traversal!
+    return fs.readFileSync(filePath);
+}
+
+// SECURE: Path validation and normalization
+function getFileSecure(fileName) {
+    // Validate filename (example: alphanumeric + extension only)
+    if (!/^[a-zA-Z0-9]+\.[a-zA-Z0-9]+$/.test(fileName)) {
+        throw new Error('Invalid filename');
+    }
+    
+    // Resolve to absolute path and validate it's within allowed directory
+    const basePath = path.resolve('./resources');
+    const filePath = path.resolve(path.join(basePath, fileName));
+    
+    // Check if the resolved path is within the base directory
+    if (!filePath.startsWith(basePath)) {
+        throw new Error('Path traversal attempt detected');
+    }
+    
+    return fs.readFileSync(filePath);
+}
+```
+
+#### Python Example
+
+```python
+import os
+import re
+from pathlib import Path
+
+# INSECURE: Directly using user input in file paths
+def get_file_insecure(file_name):
+    file_path = f"./resources/{file_name}"  # VULNERABLE to path traversal!
+    with open(file_path, 'r') as file:
+        return file.read()
+
+# SECURE: Path validation and normalization
+def get_file_secure(file_name):
+    # Validate filename (example: alphanumeric + extension only)
+    if not re.match(r'^[a-zA-Z0-9]+\.[a-zA-Z0-9]+$', file_name):
+        raise ValueError("Invalid filename")
+    
+    # Resolve to absolute path and validate it's within allowed directory
+    base_path = os.path.abspath('./resources')
+    file_path = os.path.abspath(os.path.join(base_path, file_name))
+    
+    # Check if the resolved path is within the base directory
+    if not file_path.startswith(base_path):
+        raise ValueError("Path traversal attempt detected")
+    
+    with open(file_path, 'r') as file:
+        return file.read()
+        
+# SECURE: Using pathlib (Python 3.4+)
+def get_file_with_pathlib(file_name):
+    # Validate filename
+    if not re.match(r'^[a-zA-Z0-9]+\.[a-zA-Z0-9]+$', file_name):
+        raise ValueError("Invalid filename")
+        
+    base_path = Path('./resources').resolve()
+    file_path = (base_path / file_name).resolve()
+    
+    # Check if the resolved path is within the base directory
+    if base_path not in file_path.parents and base_path != file_path:
+        raise ValueError("Path traversal attempt detected")
+        
+    return file_path.read_text()
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "direct_sql_concat",
+        "wrong": "Concatenating user input directly into SQL queries",
+        "correct": "Using parameterized queries or prepared statements",
+        "reason": "Direct concatenation allows attackers to inject malicious SQL"
+    },
+    {
+        "id": "raw_html_output",
+        "wrong": "Rendering user input directly in HTML responses",
+        "correct": "Using context-appropriate encoding and output sanitization",
+        "reason": "Unencoded output enables cross-site scripting (XSS) attacks"
+    },
+    {
+        "id": "unsanitized_file_paths",
+        "wrong": "Using user input directly in file paths without validation",
+        "correct": "Validating and normalizing paths, checking against a whitelist",
+        "reason": "Can lead to path traversal attacks and unauthorized access"
+    },
+    {
+        "id": "client_side_only",
+        "wrong": "Relying only on client-side validation",
+        "correct": "Implementing server-side validation for all inputs",
+        "reason": "Client-side validation can be bypassed by attackers"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Input Validation Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
+- [OWASP SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html)
+- [OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+- [OWASP Path Traversal Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Path_Traversal_Cheat_Sheet.html)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

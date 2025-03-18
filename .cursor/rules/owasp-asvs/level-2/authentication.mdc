@@ -1,0 +1,2093 @@
+---
+description: OWASP ASVS Level 2 requirements for advanced authentication security implementation
+globs: ["**/*.{js,jsx,ts,tsx,py}"]
+---
+
+# Advanced Authentication Security (ASVS Level 2)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 2,
+    "category": "V2 - Authentication"
+}
+
+## Overview
+
+Level 2 authentication requirements expand on the foundational Level 1 controls, adding more comprehensive protections required for applications that handle sensitive data or business functions. These controls focus on robust authentication mechanisms, credential management, and mitigating sophisticated attacks.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v2.1.2",
+        "severity": "high",
+        "description": "Password composition and complexity follow modern standards, with at least 12 characters and no composition requirements",
+        "verification": "Verify that passwords are at least 12 characters in length (after multiple spaces are combined)"
+    },
+    {
+        "id": "v2.1.8",
+        "severity": "high",
+        "description": "Password strength meters help users set stronger passwords",
+        "verification": "Verify that a password strength meter is provided to help users set stronger passwords"
+    },
+    {
+        "id": "v2.1.11",
+        "severity": "high",
+        "description": "All authentication decisions reject with a generic message using identical response time",
+        "verification": "Verify that all authentication decisions are logged, without storing sensitive session identifiers or passwords. This should include requests with missing required information, needed for security investigations."
+    },
+    {
+        "id": "v2.2.2",
+        "severity": "high",
+        "description": "Multi-factor authentication is available for high-value accounts",
+        "verification": "Verify that multi-factor authentication is offered to users to protect against credential theft"
+    },
+    {
+        "id": "v2.2.3",
+        "severity": "high",
+        "description": "Account recovery processes use secure methods, not knowledge-based answers",
+        "verification": "Verify that account recovery does not rely on knowledge-based answers"
+    },
+    {
+        "id": "v2.3.1",
+        "severity": "high",
+        "description": "Credential rotation requirements enable users to change passwords when needed",
+        "verification": "Verify that password changes include the old password, the new password, and password confirmation"
+    },
+    {
+        "id": "v2.8.3",
+        "severity": "high",
+        "description": "Password managers are supported with effective forms",
+        "verification": "Verify that forms containing credentials are filled by password managers"
+    }
+]
+
+## Implementation Guidelines
+
+### Strong Password Policies
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Implement modern password policies that focus on length rather than complexity rules. Require at least 12 characters, but avoid arbitrary composition requirements that reduce password usability. Provide clear feedback on password strength."
+}
+
+#### JavaScript Example (with React)
+
+```javascript
+import React, { useState, useEffect } from 'react';
+import zxcvbn from 'zxcvbn'; // Password strength library
+
+// Password strength meter component
+function PasswordStrengthMeter({ password }) {
+    const [strength, setStrength] = useState(0);
+    const [feedback, setFeedback] = useState('');
+    
+    useEffect(() => {
+        if (password) {
+            const result = zxcvbn(password);
+            setStrength(result.score); // 0-4 (0 is weakest, 4 is strongest)
+            
+            // Get feedback based on strength
+            if (result.feedback.warning) {
+                setFeedback(result.feedback.warning);
+            } else if (result.score < 3) {
+                setFeedback('Try a longer password with a mix of words');
+            } else {
+                setFeedback('Good password!');
+            }
+        } else {
+            setStrength(0);
+            setFeedback('');
+        }
+    }, [password]);
+    
+    // Define colors for different strength levels
+    const strengthColors = ['#ff0000', '#ff4500', '#ffa500', '#9acd32', '#008000'];
+    
+    // Define labels for different strength levels
+    const strengthLabels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+    
+    return (
+        <div className="password-strength-meter">
+            <div className="strength-meter">
+                <div
+                    className="strength-meter-fill"
+                    style={{
+                        width: `${(strength + 1) * 20}%`,
+                        backgroundColor: strengthColors[strength]
+                    }}
+                ></div>
+            </div>
+            <div className="strength-text" style={{ color: strengthColors[strength] }}>
+                {password && <span>{strengthLabels[strength]}</span>}
+            </div>
+            {feedback && <div className="strength-feedback">{feedback}</div>}
+        </div>
+    );
+}
+
+// Password input with validation and strength meter
+function PasswordInput({ onPasswordChange }) {
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
+    
+    const handlePasswordChange = (e) => {
+        const newPassword = e.target.value;
+        setPassword(newPassword);
+        
+        // Validate password according to modern standards
+        if (newPassword && newPassword.length < 12) {
+            setErrorMessage('Password must be at least 12 characters long');
+        } else {
+            setErrorMessage('');
+        }
+        
+        // Call external handler
+        if (onPasswordChange) {
+            onPasswordChange(newPassword);
+        }
+    };
+    
+    const handleConfirmPasswordChange = (e) => {
+        const newConfirmPassword = e.target.value;
+        setConfirmPassword(newConfirmPassword);
+        
+        // Check if passwords match
+        if (newConfirmPassword && password !== newConfirmPassword) {
+            setErrorMessage('Passwords do not match');
+        } else if (newConfirmPassword && newConfirmPassword.length < 12) {
+            setErrorMessage('Password must be at least 12 characters long');
+        } else {
+            setErrorMessage('');
+        }
+    };
+    
+    return (
+        <div className="password-input-container">
+            <div className="form-group">
+                <label htmlFor="password">New Password</label>
+                <input
+                    type="password"
+                    id="password"
+                    className="form-control"
+                    value={password}
+                    onChange={handlePasswordChange}
+                    autoComplete="new-password"
+                    aria-describedby="passwordHelp"
+                />
+                <small id="passwordHelp" className="form-text text-muted">
+                    Password should be at least 12 characters long. Longer passwords are stronger.
+                </small>
+                <PasswordStrengthMeter password={password} />
+            </div>
+            
+            <div className="form-group">
+                <label htmlFor="confirmPassword">Confirm Password</label>
+                <input
+                    type="password"
+                    id="confirmPassword"
+                    className="form-control"
+                    value={confirmPassword}
+                    onChange={handleConfirmPasswordChange}
+                    autoComplete="new-password"
+                />
+            </div>
+            
+            {errorMessage && (
+                <div className="alert alert-danger">{errorMessage}</div>
+            )}
+        </div>
+    );
+}
+
+// Password change form with old password requirement
+function ChangePasswordForm() {
+    const [oldPassword, setOldPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [message, setMessage] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        
+        // Perform basic validations
+        if (!oldPassword) {
+            setMessage('Current password is required');
+            setIsSubmitting(false);
+            return;
+        }
+        
+        if (newPassword.length < 12) {
+            setMessage('New password must be at least 12 characters long');
+            setIsSubmitting(false);
+            return;
+        }
+        
+        if (newPassword !== confirmPassword) {
+            setMessage('New passwords do not match');
+            setIsSubmitting(false);
+            return;
+        }
+        
+        try {
+            // Call API to change password
+            const response = await fetch('/api/user/change-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    oldPassword,
+                    newPassword
+                }),
+                credentials: 'same-origin'
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                setMessage('Password changed successfully');
+                // Clear form
+                setOldPassword('');
+                setNewPassword('');
+                setConfirmPassword('');
+            } else {
+                // Show a generic error message to avoid leaking information
+                setMessage('Password change failed. Please try again.');
+                console.error('Password change error:', data.message);
+            }
+        } catch (error) {
+            console.error('Password change error:', error);
+            setMessage('An error occurred. Please try again later.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    return (
+        <form onSubmit={handleSubmit}>
+            <div className="form-group">
+                <label htmlFor="oldPassword">Current Password</label>
+                <input
+                    type="password"
+                    id="oldPassword"
+                    className="form-control"
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                    autoComplete="current-password"
+                    required
+                />
+            </div>
+            
+            <PasswordInput onPasswordChange={setNewPassword} />
+            
+            {message && (
+                <div className={`alert ${message.includes('success') ? 'alert-success' : 'alert-danger'}`}>
+                    {message}
+                </div>
+            )}
+            
+            <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isSubmitting}
+            >
+                {isSubmitting ? 'Changing Password...' : 'Change Password'}
+            </button>
+        </form>
+    );
+}
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, render_template, redirect, url_for, flash, session
+import re
+import bcrypt
+import zxcvbn  # Password strength library
+import logging
+import time
+import os
+from datetime import datetime
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)
+
+# Configure secure logging
+logging.basicConfig(
+    filename='auth.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Simple in-memory user store for demonstration
+# In a real app, this would be a database
+users = {}
+
+# Password validation function
+def validate_password(password):
+    """
+    Validate password according to modern standards.
+    Returns (is_valid, message) tuple.
+    """
+    # Replace multiple spaces with a single space for length check
+    normalized_password = re.sub(r'\s+', ' ', password)
+    
+    if len(normalized_password) < 12:
+        return False, "Password must be at least 12 characters long"
+    
+    # Check password strength
+    result = zxcvbn.zxcvbn(password)
+    if result['score'] < 2:
+        suggestions = result.get('feedback', {}).get('suggestions', [])
+        if suggestions:
+            return False, f"Password is too weak: {suggestions[0]}"
+        return False, "Password is too weak. Try a longer password with a mix of words."
+    
+    return True, "Password is acceptable"
+
+# Secure authentication logging function
+def log_auth_event(event_type, username=None, success=None, message=None, ip=None):
+    """
+    Log authentication events securely.
+    Never logs passwords or session tokens.
+    """
+    if ip is None:
+        ip = request.remote_addr
+        
+    log_data = {
+        'timestamp': datetime.utcnow().isoformat(),
+        'event_type': event_type,
+        'ip_address': ip
+    }
+    
+    # Only add username if provided
+    if username:
+        log_data['username'] = username
+        
+    if success is not None:
+        log_data['success'] = success
+        
+    if message:
+        log_data['message'] = message
+    
+    logging.info(f"AUTH EVENT: {log_data}")
+
+# Password change route
+@app.route('/change-password', methods=['GET', 'POST'])
+def change_password():
+    if 'username' not in session:
+        flash('Please log in first', 'error')
+        return redirect(url_for('login'))
+        
+    username = session['username']
+    error = None
+    
+    if request.method == 'POST':
+        old_password = request.form.get('old_password', '')
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Start process timer to ensure consistent response times
+        start_time = time.time()
+        
+        # Get user data
+        user = users.get(username)
+        
+        if not user:
+            # This should not normally happen if the user is in session
+            log_auth_event('password_change_attempt', username=username, success=False,
+                          message="User not found")
+            error = "Password change failed"
+        elif not old_password or not new_password or not confirm_password:
+            log_auth_event('password_change_attempt', username=username, success=False,
+                          message="Missing required fields")
+            error = "All fields are required"
+        elif new_password != confirm_password:
+            log_auth_event('password_change_attempt', username=username, success=False,
+                          message="Passwords do not match")
+            error = "New passwords do not match"
+        else:
+            # Verify old password
+            if bcrypt.checkpw(old_password.encode('utf-8'), user['password']):
+                # Validate new password
+                is_valid, message = validate_password(new_password)
+                
+                if is_valid:
+                    # Hash and store new password
+                    hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt(12))
+                    users[username]['password'] = hashed_password
+                    
+                    log_auth_event('password_change', username=username, success=True)
+                    flash('Password changed successfully', 'success')
+                    
+                    # Sleep to normalize response time if needed
+                    process_time = time.time() - start_time
+                    if process_time < 1.0:  # Ensure at least 1 second for timing consistency
+                        time.sleep(1.0 - process_time)
+                        
+                    return redirect(url_for('account'))
+                else:
+                    error = message
+                    log_auth_event('password_change_attempt', username=username, success=False,
+                                  message="Password validation failed")
+            else:
+                # Log failed attempt but don't reveal which password was wrong
+                log_auth_event('password_change_attempt', username=username, success=False,
+                              message="Invalid old password")
+                error = "Password change failed"
+        
+        # Sleep to normalize response time if needed
+        process_time = time.time() - start_time
+        if process_time < 1.0:  # Ensure at least 1 second for timing consistency
+            time.sleep(1.0 - process_time)
+    
+    # Calculate password strength for frontend meter
+    def get_password_strength(password):
+        if not password:
+            return 0, "No password provided"
+            
+        result = zxcvbn.zxcvbn(password)
+        score = result['score']  # 0-4 score
+        
+        feedback_message = ""
+        if result['feedback']['warning']:
+            feedback_message = result['feedback']['warning']
+        elif score < 3:
+            feedback_message = "Try a longer password with a mix of words"
+        else:
+            feedback_message = "Good password!"
+            
+        return score, feedback_message
+        
+    # Render template with error message if any
+    return render_template(
+        'change_password.html',
+        error=error,
+        get_password_strength=get_password_strength
+    )
+
+# Example template (change_password.html):
+"""
+{% extends "layout.html" %}
+
+{% block content %}
+<h1>Change Password</h1>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+{% for message in get_flashed_messages(with_categories=true) %}
+<div class="alert alert-{{ message[0] }}">{{ message[1] }}</div>
+{% endfor %}
+
+<form method="post" action="{{ url_for('change_password') }}">
+    <div class="form-group">
+        <label for="old_password">Current Password</label>
+        <input type="password" id="old_password" name="old_password" class="form-control" required autocomplete="current-password">
+    </div>
+    
+    <div class="form-group">
+        <label for="new_password">New Password</label>
+        <input type="password" id="new_password" name="new_password" class="form-control" required autocomplete="new-password"
+               oninput="updateStrengthMeter(this.value)">
+        <small class="form-text text-muted">Password should be at least 12 characters long. Longer passwords are stronger.</small>
+        
+        <div class="password-strength-meter">
+            <div class="strength-meter">
+                <div class="strength-meter-fill" id="strength-meter-fill"></div>
+            </div>
+            <div id="strength-text"></div>
+            <div id="strength-feedback"></div>
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label for="confirm_password">Confirm New Password</label>
+        <input type="password" id="confirm_password" name="confirm_password" class="form-control" required autocomplete="new-password">
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Change Password</button>
+</form>
+
+<script>
+function updateStrengthMeter(password) {
+    // This would call a server endpoint in a real application
+    // For demo purposes, we're using hardcoded logic
+    let score = 0;
+    let feedback = "";
+    
+    if (password.length >= 12) {
+        score = Math.min(4, Math.floor(password.length / 5));
+    }
+    
+    const strengthColors = ['#ff0000', '#ff4500', '#ffa500', '#9acd32', '#008000'];
+    const strengthLabels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+    
+    document.getElementById('strength-meter-fill').style.width = `${(score + 1) * 20}%`;
+    document.getElementById('strength-meter-fill').style.backgroundColor = strengthColors[score];
+    document.getElementById('strength-text').textContent = password ? strengthLabels[score] : '';
+    document.getElementById('strength-text').style.color = strengthColors[score];
+    
+    if (password.length < 12) {
+        document.getElementById('strength-feedback').textContent = 'Password must be at least 12 characters long';
+    } else if (score < 3) {
+        document.getElementById('strength-feedback').textContent = 'Try a longer password with a mix of words';
+    } else {
+        document.getElementById('strength-feedback').textContent = 'Good password!';
+    }
+}
+</script>
+
+<style>
+.password-strength-meter {
+    margin-top: 10px;
+}
+.strength-meter {
+    height: 10px;
+    background-color: #ddd;
+    border-radius: 5px;
+    margin-bottom: 5px;
+}
+.strength-meter-fill {
+    height: 100%;
+    border-radius: 5px;
+    width: 0%;
+    transition: width 0.3s ease-in-out, background-color 0.3s ease-in-out;
+}
+#strength-text {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+#strength-feedback {
+    font-size: 0.9em;
+    margin-bottom: 10px;
+}
+</style>
+{% endblock %}
+"""
+```
+
+### Multi-Factor Authentication (MFA)
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Implement MFA options for users, especially for high-value accounts. Use time-based one-time passwords (TOTP), SMS codes, or hardware tokens depending on security needs."
+}
+
+#### JavaScript Example (with Node.js Express)
+
+```javascript
+const express = require('express');
+const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
+const bodyParser = require('body-parser');
+const cookieSession = require('cookie-session');
+
+const app = express();
+
+// Configure middleware
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cookieSession({
+    name: 'session',
+    keys: [crypto.randomBytes(32).toString('hex')],
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    secure: true,
+    httpOnly: true,
+    sameSite: 'strict'
+}));
+
+// Mock user database
+const users = {};
+
+// Check if user is logged in middleware
+const requireLogin = (req, res, next) => {
+    if (!req.session.userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+    next();
+};
+
+// Check if MFA is required but not completed
+const requireMfa = (req, res, next) => {
+    if (!req.session.userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    const user = users[req.session.userId];
+    
+    if (!user) {
+        req.session = null;
+        return res.status(401).json({ error: 'User not found' });
+    }
+    
+    // If MFA is enabled but not verified in this session
+    if (user.mfaEnabled && !req.session.mfaVerified) {
+        return res.status(403).json({
+            error: 'MFA required',
+            mfaRequired: true
+        });
+    }
+    
+    next();
+};
+
+// Login endpoint
+app.post('/api/login', async (req, res) => {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required' });
+    }
+    
+    // Find user (in a real app, check against database)
+    const user = Object.values(users).find(u => u.username === username);
+    
+    // Record start time for consistent response timing
+    const startTime = Date.now();
+    
+    let loginSuccessful = false;
+    
+    if (user && await verifyPassword(password, user.passwordHash)) {
+        // Store user ID in session
+        req.session.userId = user.id;
+        loginSuccessful = true;
+        
+        // Check if MFA is enabled
+        if (user.mfaEnabled) {
+            // Log successful password verification, but MFA still required
+            console.log(`User ${username} authenticated password successfully, MFA required`);
+            
+            // Ensure we take a consistent amount of time
+            const elapsed = Date.now() - startTime;
+            if (elapsed < 1000) {
+                await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+            }
+            
+            return res.json({
+                success: true,
+                message: 'Password verified, MFA required',
+                mfaRequired: true
+            });
+        }
+        
+        // Log successful login
+        console.log(`User ${username} logged in successfully`);
+        
+        // Ensure we take a consistent amount of time
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 1000) {
+            await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+        }
+        
+        return res.json({
+            success: true,
+            message: 'Login successful',
+            mfaRequired: false
+        });
+    }
+    
+    // Log failed login without exposing which part failed
+    console.log(`Failed login attempt for username: ${username}`);
+    
+    // Ensure we take a consistent amount of time even on failure
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 1000) {
+        await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+    }
+    
+    // Return generic error message
+    return res.status(401).json({
+        error: 'Invalid username or password'
+    });
+});
+
+// MFA verify endpoint
+app.post('/api/mfa/verify', async (req, res) => {
+    const { token } = req.body;
+    
+    if (!req.session.userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    const user = users[req.session.userId];
+    
+    if (!user) {
+        req.session = null;
+        return res.status(401).json({ error: 'User not found' });
+    }
+    
+    // Record start time for consistent response timing
+    const startTime = Date.now();
+    
+    if (!user.mfaEnabled || !user.mfaSecret) {
+        console.log(`MFA verification attempted but MFA not enabled for user ${user.username}`);
+        
+        // Ensure consistent timing
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 1000) {
+            await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+        }
+        
+        return res.status(400).json({ error: 'MFA not enabled for this account' });
+    }
+    
+    // Verify the token
+    const verified = speakeasy.totp.verify({
+        secret: user.mfaSecret,
+        encoding: 'base32',
+        token: token,
+        window: 1 // Allow 1 period before and after for clock skew
+    });
+    
+    if (verified) {
+        // Mark MFA as verified in the session
+        req.session.mfaVerified = true;
+        
+        console.log(`User ${user.username} completed MFA verification`);
+        
+        // Ensure consistent timing
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 1000) {
+            await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+        }
+        
+        return res.json({
+            success: true,
+            message: 'MFA verification successful'
+        });
+    }
+    
+    console.log(`Failed MFA verification for user ${user.username}`);
+    
+    // Ensure consistent timing
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 1000) {
+        await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+    }
+    
+    return res.status(401).json({ error: 'Invalid MFA token' });
+});
+
+// Setup MFA endpoint
+app.post('/api/mfa/setup', requireLogin, async (req, res) => {
+    const userId = req.session.userId;
+    const user = users[userId];
+    
+    // Generate new TOTP secret
+    const secret = speakeasy.generateSecret({
+        name: `MyApp:${user.username}`
+    });
+    
+    // Store secret temporarily (in a real app, you'd store pending secrets separately)
+    user.pendingMfaSecret = secret.base32;
+    
+    // Generate QR code
+    const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+    
+    res.json({
+        success: true,
+        secret: secret.base32,
+        qrCodeUrl: qrCodeUrl
+    });
+});
+
+// Confirm MFA setup
+app.post('/api/mfa/confirm', requireLogin, async (req, res) => {
+    const { token } = req.body;
+    const userId = req.session.userId;
+    const user = users[userId];
+    
+    if (!user.pendingMfaSecret) {
+        return res.status(400).json({ error: 'No pending MFA setup found' });
+    }
+    
+    // Verify the token against the pending secret
+    const verified = speakeasy.totp.verify({
+        secret: user.pendingMfaSecret,
+        encoding: 'base32',
+        token: token,
+        window: 1
+    });
+    
+    if (verified) {
+        // Activate MFA
+        user.mfaSecret = user.pendingMfaSecret;
+        user.mfaEnabled = true;
+        user.pendingMfaSecret = null;
+        
+        // Also mark current session as MFA verified
+        req.session.mfaVerified = true;
+        
+        console.log(`MFA enabled for user ${user.username}`);
+        
+        return res.json({
+            success: true,
+            message: 'MFA setup successful'
+        });
+    }
+    
+    return res.status(400).json({
+        error: 'Invalid verification code'
+    });
+});
+
+// Disable MFA (requires re-authentication)
+app.post('/api/mfa/disable', requireLogin, requireMfa, async (req, res) => {
+    const { password } = req.body;
+    const userId = req.session.userId;
+    const user = users[userId];
+    
+    // Require password re-authentication for security
+    if (!await verifyPassword(password, user.passwordHash)) {
+        return res.status(401).json({ error: 'Invalid password' });
+    }
+    
+    // Disable MFA
+    user.mfaEnabled = false;
+    user.mfaSecret = null;
+    
+    console.log(`MFA disabled for user ${user.username}`);
+    
+    return res.json({
+        success: true,
+        message: 'MFA disabled successfully'
+    });
+});
+
+// Helper function to verify password
+async function verifyPassword(password, hash) {
+    // In a real application, use bcrypt or similar
+    // For simplicity, we're just comparing strings here
+    return hash === password;
+}
+
+// Secure protected resource - requires both login and MFA if enabled
+app.get('/api/protected-resource', requireLogin, requireMfa, (req, res) => {
+    const userId = req.session.userId;
+    const user = users[userId];
+    
+    res.json({
+        success: true,
+        message: `Hello, ${user.username}! This is protected data.`,
+        data: {
+            // Sensitive data here
+        }
+    });
+});
+
+// React component example for MFA setup UI
+/*
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+function MfaSetup() {
+    const [setupData, setSetupData] = useState(null);
+    const [verificationCode, setVerificationCode] = useState('');
+    const [message, setMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    
+    // Start MFA setup
+    const initiateSetup = async () => {
+        setIsLoading(true);
+        try {
+            const response = await axios.post('/api/mfa/setup');
+            setSetupData(response.data);
+        } catch (error) {
+            setMessage('Failed to setup MFA: ' + (error.response?.data?.error || error.message));
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    // Confirm setup with verification code
+    const confirmSetup = async () => {
+        if (!verificationCode) {
+            setMessage('Please enter the verification code');
+            return;
+        }
+        
+        setIsLoading(true);
+        try {
+            const response = await axios.post('/api/mfa/confirm', { token: verificationCode });
+            setMessage('MFA setup successful! Your account is now protected.');
+            setSetupData(null);
+        } catch (error) {
+            setMessage('Failed to verify code: ' + (error.response?.data?.error || error.message));
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    return (
+        <div className="mfa-setup-container">
+            <h2>Two-Factor Authentication Setup</h2>
+            
+            {message && (
+                <div className={message.includes('successful') ? 'success-message' : 'error-message'}>
+                    {message}
+                </div>
+            )}
+            
+            {!setupData ? (
+                <div>
+                    <p>Enhance your account security with two-factor authentication.</p>
+                    <p>Once enabled, you'll need both your password and a verification code to sign in.</p>
+                    <button
+                        onClick={initiateSetup}
+                        disabled={isLoading}
+                    >
+                        {isLoading ? 'Setting up...' : 'Setup Two-Factor Authentication'}
+                    </button>
+                </div>
+            ) : (
+                <div className="setup-instructions">
+                    <p>1. Scan this QR code with your authenticator app:</p>
+                    <div className="qr-code">
+                        <img src={setupData.qrCodeUrl} alt="QR Code for MFA" />
+                    </div>
+                    
+                    <p>2. Or manually enter this secret key in your app:</p>
+                    <div className="secret-key">
+                        <code>{setupData.secret}</code>
+                    </div>
+                    
+                    <p>3. Enter the verification code from your app:</p>
+                    <div className="verification-input">
+                        <input
+                            type="text"
+                            value={verificationCode}
+                            onChange={(e) => setVerificationCode(e.target.value)}
+                            placeholder="6-digit code"
+                            maxLength={6}
+                        />
+                        <button
+                            onClick={confirmSetup}
+                            disabled={isLoading || !verificationCode}
+                        >
+                            {isLoading ? 'Verifying...' : 'Verify & Activate'}
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default MfaSetup;
+*/
+
+// MFA login verification component
+/*
+import React, { useState } from 'react';
+import axios from 'axios';
+
+function MfaVerification({ onSuccess }) {
+    const [verificationCode, setVerificationCode] = useState('');
+    const [error, setError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        
+        if (!verificationCode) {
+            setError('Please enter the verification code');
+            return;
+        }
+        
+        setIsSubmitting(true);
+        setError('');
+        
+        try {
+            const response = await axios.post('/api/mfa/verify', { token: verificationCode });
+            
+            if (response.data.success) {
+                if (onSuccess) {
+                    onSuccess();
+                }
+            }
+        } catch (error) {
+            setError(error.response?.data?.error || 'Verification failed');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    return (
+        <div className="mfa-verification">
+            <h2>Two-Factor Authentication</h2>
+            <p>Enter the verification code from your authenticator app:</p>
+            
+            {error && <div className="error-message">{error}</div>}
+            
+            <form onSubmit={handleSubmit}>
+                <div className="verification-input">
+                    <input
+                        type="text"
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
+                        placeholder="6-digit code"
+                        maxLength={6}
+                        required
+                        autoFocus
+                    />
+                    <button
+                        type="submit"
+                        disabled={isSubmitting}
+                    >
+                        {isSubmitting ? 'Verifying...' : 'Verify'}
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+export default MfaVerification;
+*/
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, jsonify, session, render_template, redirect, url_for
+import pyotp
+import qrcode
+import io
+import base64
+import os
+import time
+import hashlib
+from functools import wraps
+import uuid
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)
+
+# Configure session
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Strict',
+    PERMANENT_SESSION_LIFETIME=timedelta(days=1)
+)
+
+# Mock user database (in a real app, use a proper database)
+users = {}
+
+# Logging configuration
+import logging
+logging.basicConfig(
+    filename='auth.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def log_auth_event(event_type, username=None, success=None, message=None):
+    """Log authentication events securely"""
+    log_data = {
+        'timestamp': datetime.utcnow().isoformat(),
+        'event_type': event_type,
+        'ip_address': request.remote_addr
+    }
+    
+    if username:
+        log_data['username'] = username
+        
+    if success is not None:
+        log_data['success'] = success
+        
+    if message:
+        log_data['message'] = message
+    
+    logging.info(f"AUTH EVENT: {log_data}")
+
+# Middleware for requiring login
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            log_auth_event('unauthorized_access_attempt',
+                          message="Attempted to access protected resource without authentication")
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Middleware for requiring MFA if enabled
+def mfa_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            log_auth_event('unauthorized_access_attempt',
+                          message="Attempted to access protected resource without authentication")
+            return jsonify({'error': 'Authentication required'}), 401
+        
+        user_id = session.get('user_id')
+        user = users.get(user_id)
+        
+        if not user:
+            # User not found, clear session
+            session.clear()
+            log_auth_event('unauthorized_access_attempt',
+                          message="User ID in session not found in database")
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        # If MFA is enabled but not verified in this session
+        if user.get('mfa_enabled', False) and not session.get('mfa_verified', False):
+            log_auth_event('mfa_required', username=user.get('username'),
+                          message="Attempted to access MFA-protected resource without MFA verification")
+            return jsonify({
+                'error': 'MFA required',
+                'mfa_required': True
+            }), 403
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Login route
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        log_auth_event('login_attempt', message="Missing username or password")
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    # Find user
+    user = next((u for u in users.values() if u['username'] == username), None)
+    
+    # Record start time for consistent response timing
+    start_time = time.time()
+    
+    login_successful = False
+    
+    if user and verify_password(password, user['password_hash']):
+        # Store user ID in session
+        session['user_id'] = user['id']
+        login_successful = True
+        
+        # Check if MFA is enabled
+        if user.get('mfa_enabled', False):
+            log_auth_event('login_password_success', username=username, success=True,
+                          message="Password verified, MFA required")
+            
+            # Ensure consistent timing
+            elapsed = time.time() - start_time
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed)
+                
+            return jsonify({
+                'success': True,
+                'message': 'Password verified, MFA required',
+                'mfa_required': True
+            })
+        
+        # Log successful login without MFA
+        log_auth_event('login_success', username=username, success=True)
+        
+        # Ensure consistent timing
+        elapsed = time.time() - start_time
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+            
+        return jsonify({
+            'success': True,
+            'message': 'Login successful',
+            'mfa_required': False
+        })
+    
+    # Log failed login without exposing which part failed
+    log_auth_event('login_failure', username=username, success=False,
+                  message="Invalid username or password")
+    
+    # Ensure consistent timing even on failure
+    elapsed = time.time() - start_time
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+        
+    # Return generic error message
+    return jsonify({'error': 'Invalid username or password'}), 401
+
+# MFA verification route
+@app.route('/api/mfa/verify', methods=['POST'])
+def mfa_verify():
+    if 'user_id' not in session:
+        log_auth_event('unauthorized_mfa_attempt',
+                      message="MFA verification attempted without login")
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    data = request.get_json()
+    token = data.get('token')
+    
+    if not token:
+        log_auth_event('mfa_verification_attempt',
+                      message="Missing MFA token")
+        return jsonify({'error': 'Verification code is required'}), 400
+    
+    user_id = session['user_id']
+    user = users.get(user_id)
+    
+    if not user:
+        session.clear()
+        log_auth_event('unauthorized_mfa_attempt',
+                      message="User ID in session not found in database")
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    # Record start time for consistent response timing
+    start_time = time.time()
+    
+    if not user.get('mfa_enabled', False) or not user.get('mfa_secret'):
+        log_auth_event('mfa_verification_attempt', username=user['username'], success=False,
+                      message="MFA verification attempted but MFA not enabled")
+        
+        # Ensure consistent timing
+        elapsed = time.time() - start_time
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+            
+        return jsonify({'error': 'MFA not enabled for this account'}), 400
+    
+    # Verify the token
+    totp = pyotp.TOTP(user['mfa_secret'])
+    verified = totp.verify(token, valid_window=1)  # Allow 30 seconds before/after
+    
+    if verified:
+        # Mark MFA as verified in the session
+        session['mfa_verified'] = True
+        
+        log_auth_event('mfa_verification_success', username=user['username'], success=True)
+        
+        # Ensure consistent timing
+        elapsed = time.time() - start_time
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+            
+        return jsonify({
+            'success': True,
+            'message': 'MFA verification successful'
+        })
+    
+    log_auth_event('mfa_verification_failure', username=user['username'], success=False)
+    
+    # Ensure consistent timing
+    elapsed = time.time() - start_time
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+        
+    return jsonify({'error': 'Invalid verification code'}), 401
+
+# MFA setup route
+@app.route('/api/mfa/setup', methods=['POST'])
+@login_required
+def mfa_setup():
+    user_id = session['user_id']
+    user = users.get(user_id)
+    
+    # Generate new TOTP secret
+    secret = pyotp.random_base32()
+    
+    # Create provisioning URI for QR code
+    uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=user['username'],
+        issuer_name="Flask App"
+    )
+    
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(uri)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Convert image to base64 string
+    buffered = io.BytesIO()
+    img.save(buffered)
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    # Store secret temporarily (in a real app, store in the database)
+    user['pending_mfa_secret'] = secret
+    
+    log_auth_event('mfa_setup_initiated', username=user['username'], success=True)
+    
+    return jsonify({
+        'success': True,
+        'secret': secret,
+        'qr_code_url': f"data:image/png;base64,{img_str}"
+    })
+
+# Confirm MFA setup
+@app.route('/api/mfa/confirm', methods=['POST'])
+@login_required
+def mfa_confirm():
+    data = request.get_json()
+    token = data.get('token')
+    
+    if not token:
+        return jsonify({'error': 'Verification code is required'}), 400
+    
+    user_id = session['user_id']
+    user = users.get(user_id)
+    
+    if not user.get('pending_mfa_secret'):
+        log_auth_event('mfa_setup_error', username=user['username'], success=False,
+                      message="No pending MFA setup found")
+        return jsonify({'error': 'No pending MFA setup found'}), 400
+    
+    # Verify the token against the pending secret
+    totp = pyotp.TOTP(user['pending_mfa_secret'])
+    verified = totp.verify(token)
+    
+    if verified:
+        # Activate MFA
+        user['mfa_secret'] = user['pending_mfa_secret']
+        user['mfa_enabled'] = True
+        user['pending_mfa_secret'] = None
+        
+        # Also mark current session as MFA verified
+        session['mfa_verified'] = True
+        
+        log_auth_event('mfa_setup_complete', username=user['username'], success=True)
+        
+        return jsonify({
+            'success': True,
+            'message': 'MFA setup successful'
+        })
+    
+    log_auth_event('mfa_setup_verification_failure', username=user['username'], success=False)
+    
+    return jsonify({
+        'error': 'Invalid verification code'
+    }), 400
+
+# Disable MFA route
+@app.route('/api/mfa/disable', methods=['POST'])
+@login_required
+@mfa_required
+def mfa_disable():
+    data = request.get_json()
+    password = data.get('password')
+    
+    if not password:
+        return jsonify({'error': 'Password is required'}), 400
+    
+    user_id = session['user_id']
+    user = users.get(user_id)
+    
+    # Require password re-authentication for security
+    if not verify_password(password, user['password_hash']):
+        log_auth_event('mfa_disable_attempt', username=user['username'], success=False,
+                      message="Invalid password provided for MFA disable")
+        return jsonify({'error': 'Invalid password'}), 401
+    
+    # Disable MFA
+    user['mfa_enabled'] = False
+    user['mfa_secret'] = None
+    
+    log_auth_event('mfa_disabled', username=user['username'], success=True)
+    
+    return jsonify({
+        'success': True,
+        'message': 'MFA disabled successfully'
+    })
+
+# Protected resource route
+@app.route('/api/protected-resource')
+@login_required
+@mfa_required
+def protected_resource():
+    user_id = session['user_id']
+    user = users.get(user_id)
+    
+    return jsonify({
+        'success': True,
+        'message': f"Hello, {user['username']}! This is protected data.",
+        'data': {
+            # Sensitive data here
+        }
+    })
+
+# Helper function to verify password
+def verify_password(password, hash_value):
+    """
+    In a real application, use bcrypt or similar.
+    This is a simplified example.
+    """
+    # Simple string comparison for demo
+    return hash_value == hashlib.sha256(password.encode()).hexdigest()
+
+# Add a sample user
+def add_sample_user():
+    """Add a sample user for testing"""
+    user_id = str(uuid.uuid4())
+    users[user_id] = {
+        'id': user_id,
+        'username': 'testuser',
+        'password_hash': hashlib.sha256('password123'.encode()).hexdigest(),
+        'mfa_enabled': False,
+        'mfa_secret': None
+    }
+
+# Initialize sample user
+add_sample_user()
+
+# Flask template for MFA setup (mfa_setup.html)
+"""
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="mfa-setup-container">
+    <h2>Two-Factor Authentication Setup</h2>
+    
+    {% if message %}
+    <div class="{% if 'success' in message %}success-message{% else %}error-message{% endif %}">
+        {{ message }}
+    </div>
+    {% endif %}
+    
+    {% if not setup_data %}
+    <div>
+        <p>Enhance your account security with two-factor authentication.</p>
+        <p>Once enabled, you'll need both your password and a verification code to sign in.</p>
+        <form method="post" action="{{ url_for('mfa_setup') }}">
+            <button type="submit" {% if is_loading %}disabled{% endif %}>
+                {% if is_loading %}Setting up...{% else %}Setup Two-Factor Authentication{% endif %}
+            </button>
+        </form>
+    </div>
+    {% else %}
+    <div class="setup-instructions">
+        <p>1. Scan this QR code with your authenticator app:</p>
+        <div class="qr-code">
+            <img src="{{ setup_data.qr_code_url }}" alt="QR Code for MFA">
+        </div>
+        
+        <p>2. Or manually enter this secret key in your app:</p>
+        <div class="secret-key">
+            <code>{{ setup_data.secret }}</code>
+        </div>
+        
+        <p>3. Enter the verification code from your app:</p>
+        <form method="post" action="{{ url_for('mfa_confirm') }}">
+            <div class="verification-input">
+                <input
+                    type="text"
+                    name="token"
+                    placeholder="6-digit code"
+                    maxlength="6"
+                    required
+                >
+                <button type="submit" {% if is_loading %}disabled{% endif %}>
+                    {% if is_loading %}Verifying...{% else %}Verify & Activate{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+"""
+
+# Flask template for MFA verification (mfa_verify.html)
+"""
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="mfa-verification">
+    <h2>Two-Factor Authentication</h2>
+    <p>Enter the verification code from your authenticator app:</p>
+    
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+    
+    <form method="post" action="{{ url_for('mfa_verify') }}">
+        <div class="verification-input">
+            <input
+                type="text"
+                name="token"
+                placeholder="6-digit code"
+                maxlength="6"
+                required
+                autofocus
+            >
+            <button type="submit" {% if is_submitting %}disabled{% endif %}>
+                {% if is_submitting %}Verifying...{% else %}Verify{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+"""
+```
+
+## Secure Authentication Logging
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Implement secure authentication logging that records authentication events without storing sensitive information like passwords or tokens. Use consistent response times to prevent timing attacks."
+}
+
+#### JavaScript Example
+
+```javascript
+const winston = require('winston');
+const { format } = winston;
+const fs = require('fs');
+const path = require('path');
+
+// Ensure log directory exists
+const logDir = 'logs';
+if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir);
+}
+
+// Configure logger
+const logger = winston.createLogger({
+    level: 'info',
+    format: format.combine(
+        format.timestamp({
+            format: 'YYYY-MM-DD HH:mm:ss'
+        }),
+        format.errors({ stack: true }),
+        format.json()
+    ),
+    defaultMeta: { service: 'auth-service' },
+    transports: [
+        // Write logs to files
+        new winston.transports.File({
+            filename: path.join(logDir, 'error.log'),
+            level: 'error',
+            maxsize: 10485760, // 10MB
+            maxFiles: 10,
+        }),
+        new winston.transports.File({
+            filename: path.join(logDir, 'auth.log'),
+            maxsize: 10485760, // 10MB
+            maxFiles: 10,
+        })
+    ]
+});
+
+// Add console logging in development
+if (process.env.NODE_ENV !== 'production') {
+    logger.add(new winston.transports.Console({
+        format: format.combine(
+            format.colorize(),
+            format.simple()
+        )
+    }));
+}
+
+// Auth logger service
+class AuthLogger {
+    /**
+     * Log an authentication event securely
+     * @param {string} eventType - Type of authentication event
+     * @param {object} data - Event data (don't include passwords or tokens!)
+     */
+    static logAuthEvent(eventType, data = {}) {
+        // Never log sensitive information like passwords or tokens
+        if (data.password) delete data.password;
+        if (data.token) delete data.token;
+        if (data.accessToken) delete data.accessToken;
+        if (data.refreshToken) delete data.refreshToken;
+        
+        // Log the event
+        logger.info({
+            eventType,
+            timestamp: new Date().toISOString(),
+            ...data,
+        });
+    }
+    
+    /**
+     * Log an authentication error securely
+     * @param {string} eventType - Type of authentication event
+     * @param {object} data - Event data
+     * @param {Error} error - Error object
+     */
+    static logAuthError(eventType, data = {}, error = null) {
+        // Never log sensitive information
+        if (data.password) delete data.password;
+        if (data.token) delete data.token;
+        if (data.accessToken) delete data.accessToken;
+        if (data.refreshToken) delete data.refreshToken;
+        
+        // Log the error
+        logger.error({
+            eventType,
+            timestamp: new Date().toISOString(),
+            ...data,
+            error: error ? error.message : 'Unknown error',
+            stack: error && process.env.NODE_ENV !== 'production' ? error.stack : undefined
+        });
+    }
+}
+
+// Middleware to log auth requests with consistent timing
+function authLoggingMiddleware(req, res, next) {
+    // Log request details (without sensitive data)
+    const requestData = {
+        method: req.method,
+        path: req.path,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        userId: req.session?.userId || null
+    };
+    
+    AuthLogger.logAuthEvent('auth_request', requestData);
+    
+    // Record original end method
+    const originalEnd = res.end;
+    const startTime = Date.now();
+    
+    // Override response end method to log response and ensure consistent timing
+    res.end = function(chunk, encoding) {
+        // Calculate elapsed time
+        const elapsedTime = Date.now() - startTime;
+        
+        // Add minimal delay to normalize response time if needed
+        // For auth endpoints, aim for consistent timing of at least 1 second
+        // to prevent timing attacks
+        const isAuthEndpoint = req.path.includes('/auth/') ||
+                               req.path.includes('/login') ||
+                               req.path.includes('/mfa');
+        
+        if (isAuthEndpoint && elapsedTime < 1000) {
+            // Delay the response to reach a minimum of 1 second
+            setTimeout(() => {
+                // Log response
+                AuthLogger.logAuthEvent('auth_response', {
+                    ...requestData,
+                    statusCode: res.statusCode,
+                    responseTime: Date.now() - startTime
+                });
+                
+                // Call the original end method
+                originalEnd.call(res, chunk, encoding);
+            }, 1000 - elapsedTime);
+        } else {
+            // Log response immediately
+            AuthLogger.logAuthEvent('auth_response', {
+                ...requestData,
+                statusCode: res.statusCode,
+                responseTime: elapsedTime
+            });
+            
+            // Call the original end method
+            originalEnd.call(res, chunk, encoding);
+        }
+    };
+    
+    next();
+}
+
+// Example usage in routes
+async function loginHandler(req, res) {
+    const { username, password } = req.body;
+    
+    try {
+        // Record start time for consistent timing
+        const startTime = Date.now();
+        
+        // Find user
+        const user = await findUserByUsername(username);
+        
+        if (!user) {
+            // User not found, but don't expose this information
+            // Log event securely
+            AuthLogger.logAuthEvent('login_failure', {
+                username,
+                ip: req.ip,
+                reason: 'user_not_found'
+            });
+            
+            // Ensure consistent timing to prevent username enumeration
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime < 1000) {
+                await new Promise(resolve => setTimeout(resolve, 1000 - elapsedTime));
+            }
+            
+            // Return generic error
+            return res.status(401).json({
+                error: 'Invalid username or password'
+            });
+        }
+        
+        // Verify password
+        const isPasswordValid = await verifyPassword(password, user.passwordHash);
+        
+        if (isPasswordValid) {
+            // Password is valid
+            // Log successful login
+            AuthLogger.logAuthEvent('login_success', {
+                username,
+                userId: user.id,
+                ip: req.ip
+            });
+            
+            // Set session
+            req.session.userId = user.id;
+            
+            // Ensure consistent timing
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime < 1000) {
+                await new Promise(resolve => setTimeout(resolve, 1000 - elapsedTime));
+            }
+            
+            return res.json({ success: true });
+        } else {
+            // Password is invalid
+            // Log failed login
+            AuthLogger.logAuthEvent('login_failure', {
+                username,
+                userId: user.id, // We know the user exists
+                ip: req.ip,
+                reason: 'invalid_password'
+            });
+            
+            // Update failed login attempts
+            await updateFailedLoginAttempts(user.id);
+            
+            // Ensure consistent timing
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime < 1000) {
+                await new Promise(resolve => setTimeout(resolve, 1000 - elapsedTime));
+            }
+            
+            // Return generic error
+            return res.status(401).json({
+                error: 'Invalid username or password'
+            });
+        }
+    } catch (error) {
+        // Log error
+        AuthLogger.logAuthError('login_error', {
+            username,
+            ip: req.ip
+        }, error);
+        
+        // Return generic error
+        return res.status(500).json({
+            error: 'An error occurred during login'
+        });
+    }
+}
+```
+
+#### Python Example
+
+```python
+import logging
+import time
+import os
+import json
+from datetime import datetime
+from functools import wraps
+from flask import Flask, request, jsonify, g, session
+
+# Ensure log directory exists
+log_dir = 'logs'
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+# Configure logger
+logger = logging.getLogger('auth_logger')
+logger.setLevel(logging.INFO)
+
+# Create file handler
+file_handler = logging.FileHandler(os.path.join(log_dir, 'auth.log'))
+file_handler.setLevel(logging.INFO)
+
+# Create formatter
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add handler to logger
+logger.addHandler(file_handler)
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)
+
+# Secure auth logging class
+class AuthLogger:
+    @staticmethod
+    def sanitize_data(data):
+        """Remove sensitive information from log data"""
+        if not isinstance(data, dict):
+            return data
+            
+        # Create a copy to avoid modifying the original
+        sanitized = data.copy()
+        
+        # Remove sensitive fields
+        sensitive_fields = [
+            'password', 'token', 'access_token', 'refresh_token',
+            'session_id', 'cookie', 'mfa_secret'
+        ]
+        
+        for field in sensitive_fields:
+            if field in sanitized:
+                sanitized[field] = '[REDACTED]'
+                
+        return sanitized
+    
+    @staticmethod
+    def log_auth_event(event_type, data=None):
+        """Log an authentication event securely"""
+        if data is None:
+            data = {}
+            
+        # Add common fields
+        log_data = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'event_type': event_type,
+            'ip': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent', ''),
+            'path': request.path
+        }
+        
+        # Add provided data (sanitized)
+        log_data.update(AuthLogger.sanitize_data(data))
+        
+        # Log as JSON
+        logger.info(json.dumps(log_data))
+    
+    @staticmethod
+    def log_auth_error(event_type, data=None, error=None):
+        """Log an authentication error securely"""
+        if data is None:
+            data = {}
+            
+        # Add common fields
+        log_data = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'event_type': event_type,
+            'ip': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent', ''),
+            'path': request.path
+        }
+        
+        # Add error information
+        if error:
+            log_data['error'] = str(error)
+        
+        # Add provided data (sanitized)
+        log_data.update(AuthLogger.sanitize_data(data))
+        
+        # Log as JSON
+        logger.error(json.dumps(log_data))
+
+# Middleware to log auth requests with consistent timing
+def auth_logging_middleware():
+    @app.before_request
+    def before_request():
+        # Store start time
+        g.start_time = time.time()
+        
+        # Log request
+        AuthLogger.log_auth_event('auth_request', {
+            'method': request.method,
+            'user_id': session.get('user_id')
+        })
+    
+    @app.after_request
+    def after_request(response):
+        # Calculate elapsed time
+        elapsed_time = time.time() - g.start_time
+        
+        # Determine if this is an auth endpoint
+        is_auth_endpoint = any(path in request.path for path in
+                             ['/api/login', '/api/register', '/api/mfa'])
+        
+        # Add delay for auth endpoints if needed to normalize response time
+        if is_auth_endpoint and elapsed_time < 1.0:
+            time.sleep(1.0 - elapsed_time)
+        
+        # Log response
+        AuthLogger.log_auth_event('auth_response', {
+            'method': request.method,
+            'status_code': response.status_code,
+            'user_id': session.get('user_id'),
+            'response_time': time.time() - g.start_time
+        })
+        
+        return response
+
+# Login route with secure logging
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        AuthLogger.log_auth_event('login_failure', {
+            'reason': 'missing_credentials'
+        })
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    try:
+        # Record start time for consistent timing
+        start_time = time.time()
+        
+        # Find user (simulated)
+        user = find_user_by_username(username)
+        
+        if not user:
+            # User not found, but don't expose this information
+            AuthLogger.log_auth_event('login_failure', {
+                'username': username,
+                'reason': 'user_not_found'
+            })
+            
+            # Ensure consistent timing to prevent username enumeration
+            elapsed_time = time.time() - start_time
+            if elapsed_time < 1.0:
+                time.sleep(1.0 - elapsed_time)
+                
+            # Return generic error
+            return jsonify({'error': 'Invalid username or password'}), 401
+        
+        # Verify password
+        is_password_valid = verify_password(password, user['password_hash'])
+        
+        if is_password_valid:
+            # Password is valid
+            AuthLogger.log_auth_event('login_success', {
+                'username': username,
+                'user_id': user['id']
+            })
+            
+            # Set session
+            session['user_id'] = user['id']
+            
+            # Ensure consistent timing
+            elapsed_time = time.time() - start_time
+            if elapsed_time < 1.0:
+                time.sleep(1.0 - elapsed_time)
+                
+            return jsonify({'success': True})
+        else:
+            # Password is invalid
+            AuthLogger.log_auth_event('login_failure', {
+                'username': username,
+                'user_id': user['id'],  # We know the user exists
+                'reason': 'invalid_password'
+            })
+            
+            # Update failed login attempts
+            update_failed_login_attempts(user['id'])
+            
+            # Ensure consistent timing
+            elapsed_time = time.time() - start_time
+            if elapsed_time < 1.0:
+                time.sleep(1.0 - elapsed_time)
+                
+            # Return generic error
+            return jsonify({'error': 'Invalid username or password'}), 401
+    except Exception as e:
+        # Log error
+        AuthLogger.log_auth_error('login_error', {
+            'username': username
+        }, error=e)
+        
+        # Return generic error
+        return jsonify({'error': 'An error occurred during login'}), 500
+
+# Initialize the middleware
+auth_logging_middleware()
+
+# Simulated user lookup function
+def find_user_by_username(username):
+    # Simulated user database
+    if username == 'testuser':
+        return {
+            'id': '123',
+            'username': 'testuser',
+            'password_hash': 'hashed_password_here'
+        }
+    return None
+
+# Simulated password verification
+def verify_password(password, password_hash):
+    # Simulated verification
+    return password == 'correct_password'
+
+# Simulated update failed login attempts
+def update_failed_login_attempts(user_id):
+    # In a real application, increment a counter in the database
+    pass
+
+if __name__ == '__main__':
+    app.run(debug=True)
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "weak_password_policies",
+        "wrong": "Using complex composition requirements (e.g., requiring special characters, numbers) with short minimum lengths",
+        "correct": "Enforcing longer passwords (12+ characters) with fewer composition requirements",
+        "reason": "Short passwords with special character requirements often lead to predictable patterns, while longer passwords provide better security"
+    },
+    {
+        "id": "knowledge_based_recovery",
+        "wrong": "Implementing security questions for account recovery",
+        "correct": "Using email verification, backup codes, or secondary contact methods",
+        "reason": "Security questions are often easily guessed or researched, especially in the age of social media"
+    },
+    {
+        "id": "constant_timing_issues",
+        "wrong": "Different response times for success vs. failure cases in authentication flows",
+        "correct": "Implementing consistent response timing across all authentication operations",
+        "reason": "Timing differences can be exploited to determine if usernames exist or passwords are partially correct"
+    },
+    {
+        "id": "insecure_password_fields",
+        "wrong": "Non-standard password fields that break password managers",
+        "correct": "Using standard form elements with proper autocomplete attributes",
+        "reason": "Password managers help users create and use strong unique passwords"
+    },
+    {
+        "id": "mfa_bypass",
+        "wrong": "Allowing critical operations without re-verifying MFA",
+        "correct": "Requiring MFA re-verification for sensitive operations (e.g., disabling MFA, changing email)",
+        "reason": "MFA should be verified for all sensitive operations, not just login"
+    },
+    {
+        "id": "logging_sensitive_data",
+        "wrong": "Including passwords, tokens, or session IDs in log entries",
+        "correct": "Never logging sensitive authentication data, even in debug logs",
+        "reason": "Logs are often accessible to more people and may persist longer than expected"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+- [NIST Special Publication 800-63B: Digital Identity Guidelines (Authentication)](https://pages.nist.gov/800-63-3/sp800-63b.html)
+- [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+- [OWASP Forgot Password Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html)
+- [OWASP Multi-Factor Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

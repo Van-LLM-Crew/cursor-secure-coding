@@ -1,0 +1,951 @@
+---
+description: OWASP ASVS Level 2 requirements for advanced input validation and sanitization to prevent injection attacks
+globs: ["**/*.{js,jsx,ts,tsx,py}"]
+---
+
+# Advanced Input Validation and Sanitization (ASVS Level 2)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 2,
+    "category": "V5 - Validation, Sanitization and Encoding"
+}
+
+## Overview
+
+Level 2 input validation requirements extend the essential Level 1 controls with more comprehensive validations and protections against sophisticated injection attacks. These controls are important for applications handling sensitive data or business functions.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v5.1.2",
+        "severity": "high",
+        "description": "All structured data is validated against defined schemas using positive validation (allowlist)",
+        "verification": "Verify that input validation routines use a positive (allowlist) approach"
+    },
+    {
+        "id": "v5.1.3",
+        "severity": "high",
+        "description": "URL redirects and forwards only use trusted data and whitelist allowed destinations",
+        "verification": "Verify that URL redirects and forwards only allow destinations which appear on an allowlist"
+    },
+    {
+        "id": "v5.1.4",
+        "severity": "high",
+        "description": "Data from untrusted sources is validated, filtered, or sanitized to be safe for use in OS commands, file operations, or dynamic queries",
+        "verification": "Verify that data selection or database queries (e.g. SQL, HQL, ORM, NoSQL) use parameterized queries, ORMs, entity frameworks, or are otherwise protected from database injection attacks"
+    },
+    {
+        "id": "v5.2.2",
+        "severity": "high",
+        "description": "Unstructured data is sanitized to enforce safety measures such as allowed characters and length",
+        "verification": "Verify that unstructured data is sanitized to enforce safety measures such as allowed characters and length"
+    },
+    {
+        "id": "v5.2.4",
+        "severity": "high",
+        "description": "Data is validated or sanitized before being included in emails, headers, and other contexts",
+        "verification": "Verify that data is validated before being included in mail headers or other contexts"
+    },
+    {
+        "id": "v5.2.6",
+        "severity": "high",
+        "description": "The application protects against JSON injection attacks, CSRF, or inclusion of arbitrary JavaScript",
+        "verification": "Verify that the application protects against JSON injection attacks"
+    },
+    {
+        "id": "v5.3.4",
+        "severity": "high",
+        "description": "The application uses LDAP encoding or query parameterization to protect against LDAP Injection",
+        "verification": "Verify that the application uses LDAP encoding or query parameterization to protect against LDAP Injection"
+    },
+    {
+        "id": "v5.3.5",
+        "severity": "high",
+        "description": "The application uses proper parameterization to avoid OS command injection attacks",
+        "verification": "Verify that the application uses proper parameterization to avoid OS command injection attacks"
+    }
+]
+
+## Implementation Guidelines
+
+### Schema-Based Validation
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Use schema validation libraries to ensure data conforms to expected structures, types, and constraints before processing. Prefer allowlist (positive) validation over blocklist approaches."
+}
+
+#### JavaScript Example
+
+```javascript
+// Using Joi for schema validation
+const Joi = require('joi');
+
+// Define schema with explicit allowed values and constraints
+const userSchema = Joi.object({
+    username: Joi.string().alphanum().min(3).max(30).required(),
+    email: Joi.string().email().required(),
+    age: Joi.number().integer().min(18).max(120),
+    role: Joi.string().valid('user', 'admin', 'editor').default('user'),
+    settings: Joi.object({
+        notifications: Joi.boolean().default(true),
+        theme: Joi.string().valid('light', 'dark', 'system').default('system')
+    }).default()
+});
+
+// Validate input data against schema
+function validateUser(userData) {
+    const { error, value } = userSchema.validate(userData, {
+        abortEarly: false,     // Report all errors, not just the first one
+        stripUnknown: true,    // Remove unknown properties
+        presence: 'required'   // Require presence of all required fields
+    });
+    
+    if (error) {
+        const errorDetails = error.details.map(detail => ({
+            field: detail.path.join('.'),
+            message: detail.message
+        }));
+        
+        throw new Error(`Validation failed: ${JSON.stringify(errorDetails)}`);
+    }
+    
+    return value; // Return the validated and sanitized data
+}
+
+// Using JSON Schema validator (ajv)
+const Ajv = require('ajv');
+const ajv = new Ajv({ allErrors: true, removeAdditional: 'all' });
+const addFormats = require('ajv-formats');
+addFormats(ajv);
+
+// Define JSON schema with positive validation rules
+const productSchema = {
+    type: 'object',
+    properties: {
+        name: { type: 'string', minLength: 1, maxLength: 100 },
+        price: { type: 'number', minimum: 0 },
+        category: { type: 'string', enum: ['electronics', 'books', 'clothing'] },
+        tags: {
+            type: 'array',
+            items: { type: 'string', pattern: '^[a-zA-Z0-9-_]+$' },
+            maxItems: 10
+        },
+        inStock: { type: 'boolean' }
+    },
+    required: ['name', 'price', 'category'],
+    additionalProperties: false
+};
+
+const validateProduct = ajv.compile(productSchema);
+
+function processProduct(productData) {
+    const isValid = validateProduct(productData);
+    
+    if (!isValid) {
+        const errors = validateProduct.errors.map(err => ({
+            field: err.instancePath || err.params.missingProperty || 'unknown',
+            message: err.message
+        }));
+        
+        throw new Error(`Product validation failed: ${JSON.stringify(errors)}`);
+    }
+    
+    return productData; // Sanitized and validated data
+}
+```
+
+#### Python Example
+
+```python
+# Using Pydantic for schema validation
+from pydantic import BaseModel, Field, EmailStr, validator
+from typing import List, Optional
+from enum import Enum
+
+# Define data model with constraints
+class UserRole(str, Enum):
+    USER = "user"
+    ADMIN = "admin"
+    EDITOR = "editor"
+
+class UserSettings(BaseModel):
+    notifications: bool = True
+    theme: str = Field(
+        default="system",
+        pattern="^(light|dark|system)$"
+    )
+
+class User(BaseModel):
+    username: str = Field(..., min_length=3, max_length=30, pattern="^[a-zA-Z0-9]+$")
+    email: EmailStr
+    age: Optional[int] = Field(None, ge=18, le=120)
+    role: UserRole = UserRole.USER
+    settings: Optional[UserSettings] = None
+    
+    # Custom validators can add additional rules
+    @validator('username')
+    def username_not_reserved(cls, v):
+        reserved_names = ['admin', 'system', 'root']
+        if v.lower() in reserved_names:
+            raise ValueError(f'Username cannot be one of {reserved_names}')
+        return v
+
+# Validate input data against schema
+def validate_user(user_data: dict):
+    try:
+        # This will validate and coerce the data according to the schema
+        validated_user = User(**user_data)
+        # Return the model as a dictionary with all default values populated
+        return validated_user.dict()
+    except Exception as e:
+        # Handle validation errors
+        raise ValueError(f"User validation failed: {str(e)}")
+
+# Using Marshmallow for schema validation
+from marshmallow import Schema, fields, validates, ValidationError, validate
+
+class ProductSchema(Schema):
+    name = fields.Str(required=True, validate=validate.Length(min=1, max=100))
+    price = fields.Float(required=True, validate=validate.Range(min=0))
+    category = fields.Str(required=True, validate=validate.OneOf(
+        ['electronics', 'books', 'clothing']
+    ))
+    tags = fields.List(
+        fields.Str(validate=validate.Regexp(r'^[a-zA-Z0-9-_]+$')),
+        validate=validate.Length(max=10)
+    )
+    in_stock = fields.Boolean()
+    
+    # Additional custom validation
+    @validates('name')
+    def validate_name(self, value):
+        if value.strip() == '':
+            raise ValidationError('Name cannot be empty or whitespace only')
+        
+        # Check for potential injection characters
+        dangerous_chars = ['<', '>', ';', '&', '|']
+        if any(char in value for char in dangerous_chars):
+            raise ValidationError('Name contains potentially dangerous characters')
+
+# Validate input data
+def process_product(product_data):
+    schema = ProductSchema()
+    try:
+        # Validate and deserialize the input
+        validated_data = schema.load(product_data)
+        return validated_data
+    except ValidationError as err:
+        # Format the errors
+        error_messages = []
+        for field, messages in err.messages.items():
+            if isinstance(messages, list):
+                for message in messages:
+                    error_messages.append(f"{field}: {message}")
+            else:
+                error_messages.append(f"{field}: {messages}")
+                
+        raise ValueError(f"Product validation failed: {'; '.join(error_messages)}")
+```
+
+### Safe URL Redirects and Forwards
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Validate all redirect URLs against an allowlist of permitted destinations. Avoid passing user-controlled data directly to redirect functions."
+}
+
+#### JavaScript Example (with Express.js)
+
+```javascript
+// INSECURE: Using user input directly for redirects
+function redirectInsecure(req, res) {
+    // NEVER DO THIS!
+    const redirectUrl = req.query.url;
+    return res.redirect(redirectUrl); // Vulnerability: Open Redirect
+}
+
+// INSECURE: Partial validation (insufficient)
+function redirectPartialValidation(req, res) {
+    // STILL INSECURE - can be bypassed
+    const redirectUrl = req.query.url;
+    
+    // This can be bypassed with URLs like "https://evil.com?q=https://example.com"
+    if (redirectUrl.includes('example.com')) {
+        return res.redirect(redirectUrl);
+    }
+    
+    return res.redirect('/');
+}
+
+// SECURE: Using an allowlist of permitted domains
+function redirectSecure(req, res) {
+    const redirectUrl = req.query.url;
+    
+    // Define allowed redirect destinations
+    const allowedDomains = [
+        'example.com',
+        'sub.example.com',
+        'othersite.org'
+    ];
+    
+    // Try to extract the domain from the URL using URL object
+    let targetDomain;
+    try {
+        // Handle both absolute and relative URLs
+        const urlObj = new URL(redirectUrl, 'https://example.com');
+        targetDomain = urlObj.hostname;
+    } catch (error) {
+        // Invalid URL, redirect to default
+        return res.redirect('/');
+    }
+    
+    // Check if the domain is in the allowlist
+    if (allowedDomains.includes(targetDomain)) {
+        return res.redirect(redirectUrl);
+    } else {
+        // Log attempt for security monitoring
+        console.warn(`Blocked redirect to non-whitelisted domain: ${targetDomain}`);
+        return res.redirect('/');
+    }
+}
+
+// SECURE: Using a map of allowed redirect keys to URLs
+function redirectWithKeyMapping(req, res) {
+    const redirectKey = req.query.to;
+    
+    // Map of allowed redirect keys to destinations
+    const redirectMap = {
+        'home': '/',
+        'login': '/auth/login',
+        'account': '/user/account',
+        'docs': 'https://docs.example.com',
+        'partner': 'https://partner.example.org'
+    };
+    
+    // Check if the key exists in the map
+    if (redirectKey && redirectMap.hasOwnProperty(redirectKey)) {
+        return res.redirect(redirectMap[redirectKey]);
+    } else {
+        // Default redirect
+        return res.redirect('/');
+    }
+}
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, redirect
+from urllib.parse import urlparse
+import re
+
+app = Flask(__name__)
+
+# INSECURE: Using user input directly for redirects
+@app.route('/redirect-insecure')
+def redirect_insecure():
+    # NEVER DO THIS!
+    redirect_url = request.args.get('url', '/')
+    return redirect(redirect_url)  # Vulnerability: Open Redirect
+
+# INSECURE: Insufficient validation
+@app.route('/redirect-partial')
+def redirect_partial_validation():
+    # STILL INSECURE - can be bypassed
+    redirect_url = request.args.get('url', '/')
+    
+    # This can be bypassed with URLs like "https://evil.com?q=https://example.com"
+    if 'example.com' in redirect_url:
+        return redirect(redirect_url)
+    
+    return redirect('/')
+
+# SECURE: Using an allowlist of permitted domains
+@app.route('/redirect-secure')
+def redirect_secure():
+    redirect_url = request.args.get('url', '/')
+    
+    # Define allowed redirect destinations
+    allowed_domains = {
+        'example.com',
+        'sub.example.com',
+        'othersite.org'
+    }
+    
+    # Try to extract the domain from the URL
+    try:
+        # Handle both absolute and relative URLs
+        if redirect_url.startswith('/'):
+            # Relative URL is safe as it stays on the same domain
+            return redirect(redirect_url)
+            
+        # For absolute URLs, check the domain
+        parsed_url = urlparse(redirect_url)
+        target_domain = parsed_url.netloc
+        
+        # Check if the domain is in the allowlist
+        if target_domain in allowed_domains:
+            return redirect(redirect_url)
+        else:
+            # Log attempt for security monitoring
+            app.logger.warning(f"Blocked redirect to non-whitelisted domain: {target_domain}")
+            return redirect('/')
+    except Exception as e:
+        # Invalid URL, redirect to default
+        app.logger.error(f"Invalid redirect URL: {str(e)}")
+        return redirect('/')
+
+# SECURE: Using a map of allowed redirect keys to URLs
+@app.route('/redirect-with-key')
+def redirect_with_key_mapping():
+    redirect_key = request.args.get('to')
+    
+    # Map of allowed redirect keys to destinations
+    redirect_map = {
+        'home': '/',
+        'login': '/auth/login',
+        'account': '/user/account',
+        'docs': 'https://docs.example.com',
+        'partner': 'https://partner.example.org'
+    }
+    
+    # Check if the key exists in the map
+    if redirect_key and redirect_key in redirect_map:
+        return redirect(redirect_map[redirect_key])
+    else:
+        # Default redirect
+        return redirect('/')
+```
+
+### Command Injection Prevention
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Never use untrusted input in system commands. Use parameterized APIs, libraries that don't invoke shells, and strong input validation."
+}
+
+#### JavaScript Example (with Node.js)
+
+```javascript
+const { exec, execFile, spawn } = require('child_process');
+
+// INSECURE: Using user input in command string
+function runCommandInsecure(input) {
+    // NEVER DO THIS!
+    return new Promise((resolve, reject) => {
+        exec(`grep "${input}" /var/log/app.log`, (error, stdout, stderr) => {
+            if (error) return reject(error);
+            resolve(stdout);
+        });
+    });
+}
+
+// INSECURE: String concatenation within execFile
+function runCommandBetterButStillInsecure(input) {
+    // STILL INSECURE!
+    return new Promise((resolve, reject) => {
+        execFile('grep', [`"${input}"`, '/var/log/app.log'], (error, stdout, stderr) => {
+            if (error) return reject(error);
+            resolve(stdout);
+        });
+    });
+}
+
+// SECURE: Using execFile properly with array arguments
+function runCommandSecure(input) {
+    // Validate input first (example: only allow alphanumeric and simple punctuation)
+    if (!/^[a-zA-Z0-9\s.,_-]+$/.test(input)) {
+        return Promise.reject(new Error('Invalid input characters'));
+    }
+    
+    return new Promise((resolve, reject) => {
+        // execFile doesn't invoke a shell by default, reducing injection risks
+        execFile('grep', [input, '/var/log/app.log'], (error, stdout, stderr) => {
+            if (error) return reject(error);
+            resolve(stdout);
+        });
+    });
+}
+
+// SECURE: Using spawn with stream handling
+function runCommandWithSpawn(input) {
+    // Validate input first
+    if (!/^[a-zA-Z0-9\s.,_-]+$/.test(input)) {
+        return Promise.reject(new Error('Invalid input characters'));
+    }
+    
+    return new Promise((resolve, reject) => {
+        // spawn doesn't invoke a shell by default
+        const process = spawn('grep', [input, '/var/log/app.log']);
+        
+        let stdout = '';
+        let stderr = '';
+        
+        // Handle output streams properly
+        process.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+        
+        process.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+        
+        process.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`Command exited with code ${code}: ${stderr}`));
+            } else {
+                resolve(stdout);
+            }
+        });
+        
+        // Handle process errors
+        process.on('error', (err) => {
+            reject(err);
+        });
+        
+        // Set a timeout for the command
+        setTimeout(() => {
+            process.kill();
+            reject(new Error('Command execution timed out'));
+        }, 5000);
+    });
+}
+
+// SECURE ALTERNATIVE: Using a safer library or approach
+// For example, using a dedicated file search library instead of grep
+function searchLogSecurely(searchTerm) {
+    const fs = require('fs');
+    const readline = require('readline');
+    
+    // Validate input
+    if (!/^[a-zA-Z0-9\s.,_-]+$/.test(searchTerm)) {
+        return Promise.reject(new Error('Invalid input characters'));
+    }
+    
+    return new Promise((resolve, reject) => {
+        const results = [];
+        
+        try {
+            const fileStream = fs.createReadStream('/var/log/app.log');
+            const rl = readline.createInterface({
+                input: fileStream,
+                crlfDelay: Infinity
+            });
+            
+            rl.on('line', (line) => {
+                if (line.includes(searchTerm)) {
+                    results.push(line);
+                }
+            });
+            
+            rl.on('close', () => {
+                resolve(results.join('\n'));
+            });
+            
+            rl.on('error', (err) => {
+                reject(err);
+            });
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+```
+
+#### Python Example
+
+```python
+import subprocess
+import re
+import shlex
+from pathlib import Path
+
+# INSECURE: Using shell=True with user input
+def run_command_insecure(input_data):
+    # NEVER DO THIS!
+    try:
+        output = subprocess.check_output(
+            f'grep "{input_data}" /var/log/app.log',
+            shell=True,  # Enables shell, which is dangerous with user input
+            text=True
+        )
+        return output
+    except subprocess.CalledProcessError as e:
+        return f"Error: {str(e)}"
+
+# INSECURE: String formatting with shell=False but still vulnerable
+def run_command_better_but_still_insecure(input_data):
+    # STILL INSECURE!
+    try:
+        command = ['grep', f'"{input_data}"', '/var/log/app.log']
+        output = subprocess.check_output(command, text=True)
+        return output
+    except subprocess.CalledProcessError as e:
+        return f"Error: {str(e)}"
+
+# SECURE: Using proper argument list with validation
+def run_command_secure(input_data):
+    # Validate input first
+    if not re.match(r'^[a-zA-Z0-9\s.,_-]+$', input_data):
+        raise ValueError("Invalid input characters")
+    
+    try:
+        # Pass arguments as separate list items
+        command = ['grep', input_data, '/var/log/app.log']
+        output = subprocess.check_output(
+            command,
+            shell=False,  # Explicitly disable shell
+            text=True
+        )
+        return output
+    except subprocess.CalledProcessError as e:
+        # Handle normal program error (like grep not finding matches)
+        if e.returncode == 1:
+            return "No matches found"
+        # Log unexpected errors but don't expose details to users
+        print(f"Command error (code {e.returncode}): {str(e)}")
+        raise RuntimeError("An error occurred while executing the command")
+
+# SECURE: Using subprocess.run with timeout and explicit error handling
+def run_command_with_run(input_data):
+    # Validate input first
+    if not re.match(r'^[a-zA-Z0-9\s.,_-]+$', input_data):
+        raise ValueError("Invalid input characters")
+    
+    try:
+        # Run the command with explicit configurations
+        result = subprocess.run(
+            ['grep', input_data, '/var/log/app.log'],
+            shell=False,
+            text=True,
+            capture_output=True,
+            timeout=5  # Set timeout to prevent hanging
+        )
+        
+        # Check the return code
+        if result.returncode == 0:
+            return result.stdout
+        elif result.returncode == 1:
+            return "No matches found"
+        else:
+            # Log unexpected errors but don't expose details to users
+            print(f"Command error (code {result.returncode}): {result.stderr}")
+            raise RuntimeError("An error occurred while executing the command")
+            
+    except subprocess.TimeoutExpired:
+        raise TimeoutError("Command execution timed out")
+
+# SECURE ALTERNATIVE: Using a safer approach
+def search_log_securely(search_term):
+    # Validate input
+    if not re.match(r'^[a-zA-Z0-9\s.,_-]+$', search_term):
+        raise ValueError("Invalid input characters")
+    
+    results = []
+    
+    try:
+        log_file = Path('/var/log/app.log')
+        
+        # Ensure the file exists and is a regular file
+        if not log_file.is_file():
+            raise FileNotFoundError("Log file not found")
+        
+        # Read and process the file line by line
+        with open(log_file, 'r') as file:
+            for line in file:
+                if search_term in line:
+                    results.append(line.strip())
+        
+        return '\n'.join(results) if results else "No matches found"
+    except Exception as e:
+        # Log the error but don't expose details to users
+        print(f"Error searching log: {str(e)}")
+        raise RuntimeError("An error occurred while searching the log file")
+```
+
+## JSON Injection Prevention
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Prevent JSON injection by properly validating and sanitizing data sent to and received from JSON endpoints. Use content type validation and safe JSON parsers."
+}
+
+#### JavaScript Example
+
+```javascript
+// INSECURE: Direct embedding of user input in JSON response
+function createJsonResponseInsecure(userData) {
+    // NEVER DO THIS!
+    const responseJson = `{
+        "status": "success",
+        "user": {
+            "name": "${userData.name}",
+            "email": "${userData.email}"
+        }
+    }`;
+    
+    return responseJson; // Vulnerable to JSON injection
+}
+
+// SECURE: Using proper JSON methods to build response
+function createJsonResponseSecure(userData) {
+    // Create JavaScript object and let JSON.stringify handle the escaping
+    const responseObject = {
+        status: "success",
+        user: {
+            name: userData.name,
+            email: userData.email
+        }
+    };
+    
+    return JSON.stringify(responseObject); // Safe JSON encoding
+}
+
+// SECURE: Processing incoming JSON safely (Express.js example)
+function handleJsonRequestSecure(req, res) {
+    // Use try/catch to handle malformed JSON
+    try {
+        // Validate the Content-Type header
+        const contentType = req.headers['content-type'] || '';
+        if (!contentType.includes('application/json')) {
+            return res.status(415).json({
+                error: 'Unsupported Media Type',
+                message: 'Request must be application/json'
+            });
+        }
+        
+        // req.body should already be parsed by Express middleware like express.json()
+        const data = req.body;
+        
+        // Always validate structure and properties
+        if (!data || typeof data !== 'object') {
+            return res.status(400).json({
+                error: 'Bad Request',
+                message: 'Invalid JSON structure'
+            });
+        }
+        
+        // Additional input validation...
+        
+        // Process the data...
+        
+        // Return response
+        return res.json({
+            status: 'success',
+            // ...
+        });
+    } catch (error) {
+        console.error('JSON processing error:', error);
+        return res.status(400).json({
+            error: 'Bad Request',
+            message: 'Invalid JSON data'
+        });
+    }
+}
+
+// SECURE: Handling JSON with schema validation
+const Ajv = require('ajv');
+const ajv = new Ajv({ allErrors: true });
+
+function processJsonWithSchema(jsonData) {
+    // Define schema for expected JSON structure
+    const schema = {
+        type: 'object',
+        properties: {
+            action: { type: 'string', enum: ['create', 'update', 'delete'] },
+            data: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' },
+                    value: { type: 'string', maxLength: 200 }
+                },
+                required: ['id']
+            }
+        },
+        required: ['action', 'data'],
+        additionalProperties: false
+    };
+    
+    // Compile schema
+    const validate = ajv.compile(schema);
+    
+    // Validate data against schema
+    const valid = validate(jsonData);
+    
+    if (!valid) {
+        const errors = validate.errors.map(err => ({
+            path: err.instancePath || err.params.missingProperty || 'unknown',
+            error: err.message
+        }));
+        
+        throw new Error(`JSON validation failed: ${JSON.stringify(errors)}`);
+    }
+    
+    // Data is valid, proceed with processing
+    return jsonData;
+}
+```
+
+#### Python Example (with Flask)
+
+```python
+import json
+from flask import Flask, request, jsonify
+import jsonschema
+from jsonschema import validate
+
+app = Flask(__name__)
+
+# INSECURE: Direct string interpolation in JSON
+def create_json_response_insecure(user_data):
+    # NEVER DO THIS!
+    response_json = f'''{{
+        "status": "success",
+        "user": {{
+            "name": "{user_data['name']}",
+            "email": "{user_data['email']}"
+        }}
+    }}'''
+    
+    return response_json  # Vulnerable to JSON injection
+
+# SECURE: Proper JSON handling
+def create_json_response_secure(user_data):
+    # Create a Python dictionary and let json.dumps handle the escaping
+    response_object = {
+        "status": "success",
+        "user": {
+            "name": user_data['name'],
+            "email": user_data['email']
+        }
+    }
+    
+    return json.dumps(response_object)  # Safe JSON encoding
+
+# SECURE: Processing incoming JSON safely (Flask example)
+@app.route('/api/data', methods=['POST'])
+def handle_json_request_secure():
+    # Use try/catch to handle malformed JSON
+    try:
+        # Validate the Content-Type header
+        content_type = request.headers.get('Content-Type', '')
+        if 'application/json' not in content_type:
+            return jsonify({
+                'error': 'Unsupported Media Type',
+                'message': 'Request must be application/json'
+            }), 415
+        
+        # Parse JSON data
+        data = request.get_json()
+        
+        # Always validate structure and properties
+        if not data or not isinstance(data, dict):
+            return jsonify({
+                'error': 'Bad Request',
+                'message': 'Invalid JSON structure'
+            }), 400
+        
+        # Additional input validation...
+        
+        # Process the data...
+        
+        # Return response
+        return jsonify({
+            'status': 'success',
+            # ...
+        })
+    except Exception as e:
+        app.logger.error(f'JSON processing error: {str(e)}')
+        return jsonify({
+            'error': 'Bad Request',
+            'message': 'Invalid JSON data'
+        }), 400
+
+# SECURE: Handling JSON with schema validation
+def process_json_with_schema(json_data):
+    # Define schema for expected JSON structure
+    schema = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["create", "update", "delete"]},
+            "data": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]+$"},
+                    "value": {"type": "string", "maxLength": 200}
+                },
+                "required": ["id"]
+            }
+        },
+        "required": ["action", "data"],
+        "additionalProperties": False
+    }
+    
+    try:
+        # Validate data against schema
+        validate(instance=json_data, schema=schema)
+        
+        # Data is valid, proceed with processing
+        return json_data
+    except jsonschema.exceptions.ValidationError as e:
+        # Extract meaningful validation error info
+        error_path = '.'.join(str(item) for item in e.path) if e.path else 'unknown'
+        raise ValueError(f"JSON validation failed at {error_path}: {e.message}")
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "negative_validation",
+        "wrong": "Using negative validation (blocklists) to filter out bad characters",
+        "correct": "Using positive validation (allowlists) to accept only known good data",
+        "reason": "Blocklists are often incomplete and can be bypassed with encoding tricks or undocumented inputs"
+    },
+    {
+        "id": "client_side_only_validation",
+        "wrong": "Relying solely on client-side validation",
+        "correct": "Implementing both client-side and server-side validation",
+        "reason": "Client-side validation can be bypassed by attackers using proxy tools or API calls"
+    },
+    {
+        "id": "insufficient_url_validation",
+        "wrong": "Simple string checks for URL validation (e.g., startsWith, includes)",
+        "correct": "Full URL parsing and domain allowlisting",
+        "reason": "Simple string checks can be bypassed with URL encoding or special formats"
+    },
+    {
+        "id": "inline_shell_commands",
+        "wrong": "Using shell=True or concatenating strings for system commands",
+        "correct": "Using array arguments and shell=False for system commands",
+        "reason": "Shell commands with user input allow command injection attacks"
+    },
+    {
+        "id": "direct_json_string",
+        "wrong": "Building JSON strings via string concatenation or interpolation",
+        "correct": "Using proper JSON serialization methods (stringify, dumps)",
+        "reason": "String building can result in invalid JSON or allow injection attacks"
+    },
+    {
+        "id": "inconsistent_schema",
+        "wrong": "Ad-hoc validation for each endpoint or function",
+        "correct": "Using consistent schema validation across the application",
+        "reason": "Inconsistent validation leads to gaps in security and maintenance challenges"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Input Validation Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
+- [OWASP Cross-Site Scripting Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+- [OWASP LDAP Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html)
+- [OWASP OS Command Injection Defense Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html)
+- [OWASP JSON Web Token Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

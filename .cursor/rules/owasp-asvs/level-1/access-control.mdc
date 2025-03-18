@@ -1,0 +1,1709 @@
+---
+description: OWASP ASVS Level 1 requirements for implementing secure access controls
+globs: ["**/*.{js,jsx,ts,tsx,py}"]
+---
+
+# Access Control Security (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V4 - Access Control"
+}
+
+## Overview
+
+Access control is a critical security function that ensures users can only access resources and perform actions they are authorized for. Level 1 access control requirements focus on the essential controls that all applications should implement to prevent unauthorized access to data and functionality.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v4.1.1",
+        "severity": "critical",
+        "description": "The application enforces access control rules on a trusted service layer",
+        "verification": "Verify that the application enforces access control rules on a trusted service layer, especially if client-side access control is present"
+    },
+    {
+        "id": "v4.1.2",
+        "severity": "critical",
+        "description": "All user and data attributes and policy information used for access controls cannot be manipulated by end users",
+        "verification": "Verify that all user and data attributes and policy information used for access controls cannot be manipulated by end users unless specifically authorized"
+    },
+    {
+        "id": "v4.1.3",
+        "severity": "critical",
+        "description": "The principle of least privilege exists - users should only have the minimum privileges necessary to perform their work",
+        "verification": "Verify that the principle of least privilege exists"
+    },
+    {
+        "id": "v4.1.5",
+        "severity": "critical",
+        "description": "Access controls fail securely, denying access by default",
+        "verification": "Verify that access controls fail securely including when an exception occurs"
+    }
+]
+
+## Implementation Guidelines
+
+### Server-Side Access Control
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Always enforce access control rules on the server side, regardless of client-side restrictions. Never rely solely on client-side access controls or hidden elements to restrict access."
+}
+
+#### JavaScript Example (with Express.js)
+
+```javascript
+const express = require('express');
+const app = express();
+
+// For demonstration, a simple in-memory user store
+const users = {
+  'user123': { id: 'user123', role: 'user', name: 'Regular User' },
+  'admin456': { id: 'admin456', role: 'admin', name: 'Admin User' }
+};
+
+// Document data store with ownership
+const documents = {
+  'doc1': { id: 'doc1', title: 'User Document', ownerId: 'user123', content: 'Private content' },
+  'doc2': { id: 'doc2', title: 'Admin Document', ownerId: 'admin456', content: 'Confidential data' },
+  'doc3': { id: 'doc3', title: 'Public Document', ownerId: 'system', content: 'Public content', isPublic: true }
+};
+
+// INSECURE: Relying only on client-side to hide admin functionality
+/*
+function setupUI(user) {
+  if (user.role === 'admin') {
+    // Show admin controls
+    document.getElementById('adminPanel').style.display = 'block';
+  } else {
+    // Hide admin controls
+    document.getElementById('adminPanel').style.display = 'none';
+  }
+}
+*/
+
+// Authentication middleware
+function authenticate(req, res, next) {
+  const userId = req.headers['user-id']; // In real app, extract from JWT or session
+  
+  if (!userId || !users[userId]) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  // Set authenticated user on request object
+  req.user = users[userId];
+  next();
+}
+
+// SECURE: Server-side authorization middleware for admin-only routes
+function requireAdmin(req, res, next) {
+  // First ensure user is authenticated
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  // Then check if user has admin role
+  if (req.user.role !== 'admin') {
+    // Log unauthorized access attempt
+    console.warn(`Unauthorized admin access attempt by user ${req.user.id}`);
+    return res.status(403).json({ error: 'Forbidden: Admin access required' });
+  }
+  
+  // User is an admin, allow access
+  next();
+}
+
+// SECURE: Document-level authorization middleware
+function canAccessDocument(req, res, next) {
+  const docId = req.params.id;
+  const document = documents[docId];
+  
+  // Check if document exists
+  if (!document) {
+    return res.status(404).json({ error: 'Document not found' });
+  }
+  
+  // Get authenticated user
+  const user = req.user;
+  
+  // Check access permissions:
+  // 1. Document is public, or
+  // 2. User is the document owner, or
+  // 3. User is an admin
+  if (document.isPublic || document.ownerId === user.id || user.role === 'admin') {
+    // Store document in request for the route handler
+    req.document = document;
+    return next();
+  }
+  
+  // Log unauthorized access attempt
+  console.warn(`Unauthorized document access attempt: User ${user.id} tried to access document ${docId}`);
+  
+  // Access denied
+  return res.status(403).json({ error: 'Forbidden: You do not have access to this document' });
+}
+
+// Public endpoint - no authentication required
+app.get('/api/public', (req, res) => {
+  res.json({ message: 'Public API endpoint' });
+});
+
+// Regular user endpoint - requires authentication
+app.get('/api/user/profile', authenticate, (req, res) => {
+  // Since we've passed the authenticate middleware, req.user is available
+  res.json({
+    id: req.user.id,
+    name: req.user.name,
+    role: req.user.role
+  });
+});
+
+// Admin endpoint - requires authentication and admin role
+app.get('/api/admin/dashboard', authenticate, requireAdmin, (req, res) => {
+  // Only admins can reach this point
+  res.json({
+    message: 'Admin dashboard data',
+    stats: {
+      totalUsers: Object.keys(users).length,
+      totalDocuments: Object.keys(documents).length
+    }
+  });
+});
+
+// Document access - with fine-grained authorization
+app.get('/api/documents/:id', authenticate, canAccessDocument, (req, res) => {
+  // At this point, we've verified the user can access this document
+  // and req.document contains the document
+  res.json(req.document);
+});
+
+// SECURE: Document creation with proper authorization
+app.post('/api/documents', authenticate, (req, res) => {
+  const { title, content, isPublic } = req.body;
+  
+  // Validate required fields
+  if (!title || !content) {
+    return res.status(400).json({ error: 'Title and content are required' });
+  }
+  
+  // Create document with current user as owner
+  const docId = 'doc' + Date.now();
+  documents[docId] = {
+    id: docId,
+    title,
+    content,
+    ownerId: req.user.id,
+    isPublic: !!isPublic // Default to false if not provided
+  };
+  
+  res.status(201).json({
+    id: docId,
+    title,
+    ownerId: req.user.id,
+    isPublic: !!isPublic
+  });
+});
+
+// SECURE: Document update with ownership check
+app.put('/api/documents/:id', authenticate, canAccessDocument, (req, res) => {
+  const docId = req.params.id;
+  const document = req.document; // From canAccessDocument middleware
+  const { title, content, isPublic } = req.body;
+  
+  // Additional check for update permissions (only owner or admin can update)
+  if (document.ownerId !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only the owner or admin can update this document' });
+  }
+  
+  // Update document
+  if (title) document.title = title;
+  if (content) document.content = content;
+  if (isPublic !== undefined) document.isPublic = isPublic;
+  
+  res.json({
+    id: document.id,
+    title: document.title,
+    ownerId: document.ownerId,
+    isPublic: document.isPublic
+  });
+});
+
+// SECURE: Document deletion with ownership check
+app.delete('/api/documents/:id', authenticate, canAccessDocument, (req, res) => {
+  const docId = req.params.id;
+  const document = req.document; // From canAccessDocument middleware
+  
+  // Additional check for delete permissions (only owner or admin can delete)
+  if (document.ownerId !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only the owner or admin can delete this document' });
+  }
+  
+  // Delete document
+  delete documents[docId];
+  
+  res.json({ message: 'Document deleted successfully' });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  
+  // Default to secure access denial without exposing details
+  res.status(500).json({ error: 'An unexpected error occurred' });
+});
+
+// Catch-all route for undefined endpoints
+app.use((req, res) => {
+  res.status(404).json({ error: 'Resource not found' });
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, jsonify, g
+from functools import wraps
+import jwt
+import datetime
+import logging
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'  # Use a strong, randomly generated key in production
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# For demonstration, a simple in-memory user store
+users = {
+    'user123': {'id': 'user123', 'role': 'user', 'name': 'Regular User', 'password': 'user_password'},
+    'admin456': {'id': 'admin456', 'role': 'admin', 'name': 'Admin User', 'password': 'admin_password'}
+}
+
+# Document data store with ownership
+documents = {
+    'doc1': {'id': 'doc1', 'title': 'User Document', 'owner_id': 'user123', 'content': 'Private content'},
+    'doc2': {'id': 'doc2', 'title': 'Admin Document', 'owner_id': 'admin456', 'content': 'Confidential data'},
+    'doc3': {'id': 'doc3', 'title': 'Public Document', 'owner_id': 'system', 'content': 'Public content', 'is_public': True}
+}
+
+# Authentication function
+def authenticate():
+    """Authenticate a user based on JWT token"""
+    
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+        
+    try:
+        # Extract token from "Bearer <token>"
+        token = auth_header.split(' ')[1]
+        
+        # Decode and validate token
+        payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        user_id = payload['sub']
+        
+        # Check if user exists
+        if user_id in users:
+            # Store the user in Flask's g object for this request
+            g.user = users[user_id]
+            return users[user_id]
+            
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, IndexError) as e:
+        logger.warning(f"Authentication error: {str(e)}")
+        
+    return None
+
+# Authentication decorator
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Authenticate user
+        user = authenticate()
+        
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        # Proceed with the original function
+        return f(*args, **kwargs)
+    
+    return decorated
+
+# Admin authorization decorator
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # First authenticate
+        user = authenticate()
+        
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        # Then check admin role
+        if user['role'] != 'admin':
+            # Log unauthorized access attempt
+            logger.warning(f"Unauthorized admin access attempt by user {user['id']}")
+            return jsonify({'error': 'Forbidden: Admin access required'}), 403
+            
+        # User is an admin, proceed
+        return f(*args, **kwargs)
+    
+    return decorated
+
+# Document access authorization decorator
+def can_access_document(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # First authenticate
+        user = authenticate()
+        
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        # Get document ID from URL parameters
+        doc_id = kwargs.get('doc_id')
+        if not doc_id or doc_id not in documents:
+            return jsonify({'error': 'Document not found'}), 404
+            
+        document = documents[doc_id]
+        
+        # Check access permissions:
+        # 1. Document is public, or
+        # 2. User is the document owner, or
+        # 3. User is an admin
+        if document.get('is_public') or document['owner_id'] == user['id'] or user['role'] == 'admin':
+            # Store document in g for the route handler
+            g.document = document
+            return f(*args, **kwargs)
+            
+        # Log unauthorized access attempt
+        logger.warning(f"Unauthorized document access attempt: User {user['id']} tried to access document {doc_id}")
+        
+        # Access denied
+        return jsonify({'error': 'Forbidden: You do not have access to this document'}), 403
+    
+    return decorated
+
+# Login endpoint to get token
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    
+    user_id = data.get('userId')
+    password = data.get('password')
+    
+    if not user_id or not password:
+        return jsonify({'error': 'User ID and password are required'}), 400
+        
+    if user_id not in users or users[user_id]['password'] != password:
+        # In production, use constant-time comparison
+        return jsonify({'error': 'Invalid credentials'}), 401
+        
+    # Generate token
+    token_payload = {
+        'sub': user_id,
+        'role': users[user_id]['role'],
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+    }
+    
+    token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm='HS256')
+    
+    return jsonify({
+        'token': token,
+        'user': {
+            'id': user_id,
+            'name': users[user_id]['name'],
+            'role': users[user_id]['role']
+        }
+    })
+
+# Public endpoint - no authentication required
+@app.route('/api/public')
+def public_endpoint():
+    return jsonify({'message': 'Public API endpoint'})
+
+# Regular user endpoint - requires authentication
+@app.route('/api/user/profile')
+@login_required
+def user_profile():
+    # g.user is available from login_required decorator
+    return jsonify({
+        'id': g.user['id'],
+        'name': g.user['name'],
+        'role': g.user['role']
+    })
+
+# Admin endpoint - requires authentication and admin role
+@app.route('/api/admin/dashboard')
+@admin_required
+def admin_dashboard():
+    # Only admins can reach this point
+    return jsonify({
+        'message': 'Admin dashboard data',
+        'stats': {
+            'totalUsers': len(users),
+            'totalDocuments': len(documents)
+        }
+    })
+
+# Document access - with fine-grained authorization
+@app.route('/api/documents/<doc_id>')
+@can_access_document
+def get_document(doc_id):
+    # At this point, we've verified the user can access this document
+    # and g.document contains the document
+    return jsonify(g.document)
+
+# Document creation with proper authorization
+@app.route('/api/documents', methods=['POST'])
+@login_required
+def create_document():
+    data = request.get_json()
+    title = data.get('title')
+    content = data.get('content')
+    is_public = data.get('isPublic', False)
+    
+    # Validate required fields
+    if not title or not content:
+        return jsonify({'error': 'Title and content are required'}), 400
+    
+    # Create document with current user as owner
+    doc_id = f"doc{datetime.datetime.utcnow().timestamp()}"
+    documents[doc_id] = {
+        'id': doc_id,
+        'title': title,
+        'content': content,
+        'owner_id': g.user['id'],
+        'is_public': bool(is_public)
+    }
+    
+    return jsonify({
+        'id': doc_id,
+        'title': title,
+        'owner_id': g.user['id'],
+        'is_public': bool(is_public)
+    }), 201
+
+# Document update with ownership check
+@app.route('/api/documents/<doc_id>', methods=['PUT'])
+@can_access_document
+def update_document(doc_id):
+    document = g.document  # From can_access_document decorator
+    data = request.get_json()
+    
+    # Additional check for update permissions (only owner or admin can update)
+    if document['owner_id'] != g.user['id'] and g.user['role'] != 'admin':
+        return jsonify({'error': 'Only the owner or admin can update this document'}), 403
+    
+    # Update document
+    if 'title' in data:
+        document['title'] = data['title']
+    if 'content' in data:
+        document['content'] = data['content']
+    if 'isPublic' in data:
+        document['is_public'] = bool(data['isPublic'])
+    
+    return jsonify({
+        'id': document['id'],
+        'title': document['title'],
+        'owner_id': document['owner_id'],
+        'is_public': document.get('is_public', False)
+    })
+
+# Document deletion with ownership check
+@app.route('/api/documents/<doc_id>', methods=['DELETE'])
+@can_access_document
+def delete_document(doc_id):
+    document = g.document  # From can_access_document decorator
+    
+    # Additional check for delete permissions (only owner or admin can delete)
+    if document['owner_id'] != g.user['id'] and g.user['role'] != 'admin':
+        return jsonify({'error': 'Only the owner or admin can delete this document'}), 403
+    
+    # Delete document
+    del documents[doc_id]
+    
+    return jsonify({'message': 'Document deleted successfully'})
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'error': 'Resource not found'}), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    logger.error(f"Unhandled error: {str(e)}")
+    return jsonify({'error': 'An unexpected error occurred'}), 500
+
+# Default to secure access denial
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled exception: {str(e)}")
+    return jsonify({'error': 'An unexpected error occurred'}), 500
+
+if __name__ == '__main__':
+    app.run(debug=False)  # Set debug=False in production
+```
+
+### Principle of Least Privilege
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Assign the minimum privileges necessary for users to perform their functions. Use role-based access control and permission checks to limit what users can access or modify."
+}
+
+#### JavaScript Example (with Node.js)
+
+```javascript
+// Role-based access control implementation
+
+// Define roles and their permissions
+const roles = {
+  guest: {
+    permissions: ['read:public']
+  },
+  user: {
+    permissions: ['read:public', 'read:own', 'create:own', 'update:own', 'delete:own']
+  },
+  editor: {
+    permissions: ['read:public', 'read:own', 'create:own', 'update:own', 'delete:own', 'read:any', 'update:any']
+  },
+  admin: {
+    permissions: ['read:public', 'read:own', 'create:own', 'update:own', 'delete:own', 'read:any', 'create:any', 'update:any', 'delete:any', 'manage:users']
+  }
+};
+
+/**
+ * Check if a user has the required permission
+ * @param {Object} user - User object with role
+ * @param {string} permission - Permission to check
+ * @returns {boolean} - Whether user has permission
+ */
+function hasPermission(user, permission) {
+  // If no user or no role, deny access
+  if (!user || !user.role) {
+    return false;
+  }
+  
+  // Get role definition
+  const role = roles[user.role];
+  
+  // If role doesn't exist, deny access
+  if (!role) {
+    return false;
+  }
+  
+  // Check if role has the required permission
+  return role.permissions.includes(permission);
+}
+
+/**
+ * Middleware to check if user has permission
+ * @param {string} permission - Required permission
+ * @returns {Function} - Express middleware
+ */
+function requirePermission(permission) {
+  return (req, res, next) => {
+    // Ensure user is authenticated
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Check permission
+    if (!hasPermission(req.user, permission)) {
+      // Log unauthorized access attempt
+      console.warn(`Permission denied: User ${req.user.id} (${req.user.role}) tried to access resource requiring ${permission}`);
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    
+    // Has permission, proceed
+    next();
+  };
+}
+
+/**
+ * Resource-specific permission check for owned resources
+ * @param {Function} resourceFetcher - Function that returns the resource
+ * @param {string} ownerField - Field name containing owner ID
+ * @param {Object} permissions - Object mapping actions to permissions
+ * @returns {Function} - Express middleware
+ */
+function checkResourcePermission(resourceFetcher, ownerField, permissions = {}) {
+  return async (req, res, next) => {
+    // Ensure user is authenticated
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    try {
+      // Get the resource
+      const resource = await resourceFetcher(req);
+      
+      // If resource doesn't exist, return 404
+      if (!resource) {
+        return res.status(404).json({ error: 'Resource not found' });
+      }
+      
+      // Store resource in request for later use
+      req.resource = resource;
+      
+      // Get the action (default to the HTTP method)
+      const action = req.action || req.method.toLowerCase();
+      
+      // Determine required permission based on ownership
+      const isOwner = resource[ownerField] === req.user.id;
+      const permissionKey = isOwner ? 'own' : 'any';
+      const requiredPermission = permissions[action + ':' + permissionKey] || (action + ':' + permissionKey);
+      
+      // Check permission
+      if (!hasPermission(req.user, requiredPermission)) {
+        // Log unauthorized access attempt
+        console.warn(`Resource permission denied: User ${req.user.id} (${req.user.role}) tried to ${action} ${permissionKey} resource requiring ${requiredPermission}`);
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+      
+      // Has permission, proceed
+      next();
+    } catch (error) {
+      console.error('Error checking resource permission:', error);
+      return res.status(500).json({ error: 'An error occurred while checking permissions' });
+    }
+  };
+}
+
+// Example usage with Express
+
+const express = require('express');
+const app = express();
+
+// Authentication middleware (simplified)
+function authenticate(req, res, next) {
+  const userId = req.headers['user-id']; // In real app, extract from JWT or session
+  
+  if (!userId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  // Mock user database
+  const users = {
+    'user123': { id: 'user123', role: 'user', name: 'Regular User' },
+    'editor456': { id: 'editor456', role: 'editor', name: 'Editor User' },
+    'admin789': { id: 'admin789', role: 'admin', name: 'Admin User' }
+  };
+  
+  // Find user
+  const user = users[userId];
+  
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid user' });
+  }
+  
+  // Set user on request
+  req.user = user;
+  next();
+}
+
+// Mock article database
+const articles = {
+  'article1': { id: 'article1', title: 'User Article', authorId: 'user123', content: 'User content', published: true },
+  'article2': { id: 'article2', title: 'Editor Article', authorId: 'editor456', content: 'Editor content', published: true },
+  'article3': { id: 'article3', title: 'Admin Article', authorId: 'admin789', content: 'Admin content', published: true },
+  'article4': { id: 'article4', title: 'Draft Article', authorId: 'user123', content: 'Draft content', published: false }
+};
+
+// Function to fetch article based on request
+function getArticle(req) {
+  const articleId = req.params.id;
+  return Promise.resolve(articles[articleId]);
+}
+
+// Routes with permission checks
+
+// Public route - anyone can access
+app.get('/api/articles/public', (req, res) => {
+  // Filter only published articles
+  const publicArticles = Object.values(articles)
+    .filter(article => article.published)
+    .map(({ id, title, authorId }) => ({ id, title, authorId }));
+  
+  res.json(publicArticles);
+});
+
+// List all articles - requires read:any permission
+app.get('/api/articles', authenticate, requirePermission('read:any'), (req, res) => {
+  // User has read:any permission, so they can see all articles
+  res.json(Object.values(articles));
+});
+
+// Get specific article - uses resource-specific permission check
+app.get('/api/articles/:id', authenticate,
+  checkResourcePermission(getArticle, 'authorId', {
+    'get:own': 'read:own',  // Map HTTP get to read permission for own resources
+    'get:any': 'read:any'   // Map HTTP get to read permission for any resources
+  }),
+  (req, res) => {
+    // If we got here, the user has permission to access this article
+    const article = req.resource; // Set by checkResourcePermission middleware
+    
+    // For unpublished articles, enforce stricter permissions
+    if (!article.published &&
+        article.authorId !== req.user.id &&
+        !hasPermission(req.user, 'read:any')) {
+      return res.status(403).json({ error: 'Cannot access unpublished article' });
+    }
+    
+    res.json(article);
+});
+
+// Create article - requires create:own permission
+app.post('/api/articles', authenticate, requirePermission('create:own'), (req, res) => {
+  const { title, content, published } = req.body;
+  
+  // Validate input
+  if (!title || !content) {
+    return res.status(400).json({ error: 'Title and content are required' });
+  }
+  
+  // Create new article with current user as author
+  const articleId = 'article' + Date.now();
+  const newArticle = {
+    id: articleId,
+    title,
+    content,
+    authorId: req.user.id,
+    published: !!published
+  };
+  
+  // Save article
+  articles[articleId] = newArticle;
+  
+  res.status(201).json(newArticle);
+});
+
+// Update article - uses resource-specific permission check
+app.put('/api/articles/:id', authenticate,
+  checkResourcePermission(getArticle, 'authorId', {
+    'put:own': 'update:own',   // Own articles require update:own
+    'put:any': 'update:any'    // Others' articles require update:any
+  }),
+  (req, res) => {
+    // If we got here, the user has permission to update this article
+    const article = req.resource; // Set by checkResourcePermission middleware
+    const { title, content, published } = req.body;
+    
+    // Update article fields
+    if (title) article.title = title;
+    if (content) article.content = content;
+    if (published !== undefined) article.published = !!published;
+    
+    res.json(article);
+});
+
+// Delete article - uses resource-specific permission check
+app.delete('/api/articles/:id', authenticate,
+  checkResourcePermission(getArticle, 'authorId', {
+    'delete:own': 'delete:own',   // Own articles require delete:own
+    'delete:any': 'delete:any'    // Others' articles require delete:any
+  }),
+  (req, res) => {
+    // If we got here, the user has permission to delete this article
+    const articleId = req.params.id;
+    
+    // Delete article
+    delete articles[articleId];
+    
+    res.json({ message: 'Article deleted successfully' });
+});
+
+// User management - admin only
+app.get('/api/users', authenticate, requirePermission('manage:users'), (req, res) => {
+  // Only admins should have manage:users permission
+  // Return list of users without sensitive data
+  const users = {
+    'user123': { id: 'user123', role: 'user', name: 'Regular User' },
+    'editor456': { id: 'editor456', role: 'editor', name: 'Editor User' },
+    'admin789': { id: 'admin789', role: 'admin', name: 'Admin User' }
+  };
+  
+  res.json(Object.values(users));
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, jsonify, g
+from functools import wraps
+import jwt
+import datetime
+import logging
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'  # Use a strong, randomly generated key in production
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Define roles and their permissions
+roles = {
+    'guest': {
+        'permissions': ['read:public']
+    },
+    'user': {
+        'permissions': ['read:public', 'read:own', 'create:own', 'update:own', 'delete:own']
+    },
+    'editor': {
+        'permissions': ['read:public', 'read:own', 'create:own', 'update:own', 'delete:own',
+                       'read:any', 'update:any']
+    },
+    'admin': {
+        'permissions': ['read:public', 'read:own', 'create:own', 'update:own', 'delete:own',
+                       'read:any', 'create:any', 'update:any', 'delete:any', 'manage:users']
+    }
+}
+
+# Mock user database
+users = {
+    'user123': {'id': 'user123', 'role': 'user', 'name': 'Regular User', 'password': 'user_password'},
+    'editor456': {'id': 'editor456', 'role': 'editor', 'name': 'Editor User', 'password': 'editor_password'},
+    'admin789': {'id': 'admin789', 'role': 'admin', 'name': 'Admin User', 'password': 'admin_password'}
+}
+
+# Mock article database
+articles = {
+    'article1': {'id': 'article1', 'title': 'User Article', 'author_id': 'user123', 'content': 'User content', 'published': True},
+    'article2': {'id': 'article2', 'title': 'Editor Article', 'author_id': 'editor456', 'content': 'Editor content', 'published': True},
+    'article3': {'id': 'article3', 'title': 'Admin Article', 'author_id': 'admin789', 'content': 'Admin content', 'published': True},
+    'article4': {'id': 'article4', 'title': 'Draft Article', 'author_id': 'user123', 'content': 'Draft content', 'published': False}
+}
+
+def authenticate():
+    """Authenticate a user based on JWT token"""
+    
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+        
+    try:
+        # Extract token from "Bearer <token>"
+        token = auth_header.split(' ')[1]
+        
+        # Decode and validate token
+        payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        user_id = payload['sub']
+        
+        # Check if user exists
+        if user_id in users:
+            # Store the user in Flask's g object for this request
+            g.user = users[user_id]
+            return users[user_id]
+            
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, IndexError) as e:
+        logger.warning(f"Authentication error: {str(e)}")
+        
+    return None
+
+def has_permission(user, permission):
+    """
+    Check if a user has the required permission
+    
+    Args:
+        user: User dictionary with role
+        permission: Permission to check
+        
+    Returns:
+        bool: Whether user has permission
+    """
+    # If no user or no role, deny access
+    if not user or 'role' not in user:
+        return False
+    
+    # Get role definition
+    role = roles.get(user['role'])
+    
+    # If role doesn't exist, deny access
+    if not role:
+        return False
+    
+    # Check if role has the required permission
+    return permission in role['permissions']
+
+def login_required(f):
+    """Decorator to require authentication"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Authenticate user
+        user = authenticate()
+        
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        # Proceed with the original function
+        return f(*args, **kwargs)
+    
+    return decorated
+
+def require_permission(permission):
+    """
+    Decorator to check if user has permission
+    
+    Args:
+        permission: Required permission
+        
+    Returns:
+        Decorated function
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # First authenticate
+            user = authenticate()
+            
+            if not user:
+                return jsonify({'error': 'Authentication required'}), 401
+                
+            # Check permission
+            if not has_permission(user, permission):
+                # Log unauthorized access attempt
+                logger.warning(f"Permission denied: User {user['id']} ({user['role']}) tried to access resource requiring {permission}")
+                return jsonify({'error': 'Permission denied'}), 403
+                
+            # Has permission, proceed
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    
+    return decorator
+
+def check_resource_permission(resource_fetcher, owner_field, permissions=None):
+    """
+    Decorator for resource-specific permission checks
+    
+    Args:
+        resource_fetcher: Function that returns the resource
+        owner_field: Field name containing owner ID
+        permissions: Dict mapping actions to permissions
+        
+    Returns:
+        Decorated function
+    """
+    if permissions is None:
+        permissions = {}
+        
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # First authenticate
+            user = authenticate()
+            
+            if not user:
+                return jsonify({'error': 'Authentication required'}), 401
+                
+            try:
+                # Get the resource
+                resource = resource_fetcher(kwargs)
+                
+                # If resource doesn't exist, return 404
+                if not resource:
+                    return jsonify({'error': 'Resource not found'}), 404
+                    
+                # Store resource in g for later use
+                g.resource = resource
+                
+                # Get the action (default to the HTTP method)
+                action = request.method.lower()
+                
+                # Determine required permission based on ownership
+                is_owner = resource[owner_field] == user['id']
+                permission_key = 'own' if is_owner else 'any'
+                
+                # Look up the required permission, with fallback
+                action_permission = f"{action}:{permission_key}"
+                required_permission = permissions.get(action_permission, action_permission)
+                
+                # Check permission
+                if not has_permission(user, required_permission):
+                    # Log unauthorized access attempt
+                    logger.warning(f"Resource permission denied: User {user['id']} ({user['role']}) "
+                                  f"tried to {action} {permission_key} resource requiring {required_permission}")
+                    return jsonify({'error': 'Permission denied'}), 403
+                    
+                # Has permission, proceed
+                return f(*args, **kwargs)
+                
+            except Exception as e:
+                logger.error(f"Error checking resource permission: {str(e)}")
+                return jsonify({'error': 'An error occurred while checking permissions'}), 500
+                
+        return decorated_function
+        
+    return decorator
+
+# Helper function to get article
+def get_article(kwargs):
+    article_id = kwargs.get('article_id')
+    return articles.get(article_id)
+
+# Login endpoint to get token
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    
+    user_id = data.get('userId')
+    password = data.get('password')
+    
+    if not user_id or not password:
+        return jsonify({'error': 'User ID and password are required'}), 400
+        
+    if user_id not in users or users[user_id]['password'] != password:
+        # In production, use constant-time comparison
+        return jsonify({'error': 'Invalid credentials'}), 401
+        
+    # Generate token
+    token_payload = {
+        'sub': user_id,
+        'role': users[user_id]['role'],
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+    }
+    
+    token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm='HS256')
+    
+    return jsonify({
+        'token': token,
+        'user': {
+            'id': user_id,
+            'name': users[user_id]['name'],
+            'role': users[user_id]['role']
+        }
+    })
+
+# Public route - anyone can access
+@app.route('/api/articles/public')
+def public_articles():
+    # Filter only published articles
+    public_articles = [
+        {'id': article['id'], 'title': article['title'], 'author_id': article['author_id']}
+        for article in articles.values()
+        if article['published']
+    ]
+    
+    return jsonify(public_articles)
+
+# List all articles - requires read:any permission
+@app.route('/api/articles')
+@require_permission('read:any')
+def list_articles():
+    # User has read:any permission, so they can see all articles
+    return jsonify(list(articles.values()))
+
+# Get specific article - uses resource-specific permission check
+@app.route('/api/articles/<article_id>')
+@check_resource_permission(get_article, 'author_id', {
+    'get:own': 'read:own',  # Map HTTP get to read permission for own resources
+    'get:any': 'read:any'   # Map HTTP get to read permission for any resources
+})
+def get_article_by_id(article_id):
+    # If we got here, the user has permission to access this article
+    article = g.resource  # Set by check_resource_permission decorator
+    
+    # For unpublished articles, enforce stricter permissions
+    if not article['published'] and \
+       article['author_id'] != g.user['id'] and \
+       not has_permission(g.user, 'read:any'):
+        return jsonify({'error': 'Cannot access unpublished article'}), 403
+    
+    return jsonify(article)
+
+# Create article - requires create:own permission
+@app.route('/api/articles', methods=['POST'])
+@require_permission('create:own')
+def create_article():
+    data = request.get_json()
+    title = data.get('title')
+    content = data.get('content')
+    published = data.get('published', False)
+    
+    # Validate input
+    if not title or not content:
+        return jsonify({'error': 'Title and content are required'}), 400
+    
+    # Create new article with current user as author
+    article_id = f"article{datetime.datetime.utcnow().timestamp()}"
+    new_article = {
+        'id': article_id,
+        'title': title,
+        'content': content,
+        'author_id': g.user['id'],
+        'published': bool(published)
+    }
+    
+    # Save article
+    articles[article_id] = new_article
+    
+    return jsonify(new_article), 201
+
+# Update article - uses resource-specific permission check
+@app.route('/api/articles/<article_id>', methods=['PUT'])
+@check_resource_permission(get_article, 'author_id', {
+    'put:own': 'update:own',   # Own articles require update:own
+    'put:any': 'update:any'    # Others' articles require update:any
+})
+def update_article(article_id):
+    # If we got here, the user has permission to update this article
+    article = g.resource  # Set by check_resource_permission decorator
+    data = request.get_json()
+    
+    # Update article fields
+    if 'title' in data:
+        article['title'] = data['title']
+    if 'content' in data:
+        article['content'] = data['content']
+    if 'published' in data:
+        article['published'] = bool(data['published'])
+    
+    return jsonify(article)
+
+# Delete article - uses resource-specific permission check
+@app.route('/api/articles/<article_id>', methods=['DELETE'])
+@check_resource_permission(get_article, 'author_id', {
+    'delete:own': 'delete:own',   # Own articles require delete:own
+    'delete:any': 'delete:any'    # Others' articles require delete:any
+})
+def delete_article(article_id):
+    # If we got here, the user has permission to delete this article
+    
+    # Delete article
+    del articles[article_id]
+    
+    return jsonify({'message': 'Article deleted successfully'})
+
+# User management - admin only
+@app.route('/api/users')
+@require_permission('manage:users')
+def list_users():
+    # Only admins should have manage:users permission
+    # Return list of users without sensitive data
+    safe_users = [
+        {'id': user['id'], 'name': user['name'], 'role': user['role']}
+        for user in users.values()
+    ]
+    
+    return jsonify(safe_users)
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'error': 'Resource not found'}), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    logger.error(f"Unhandled error: {str(e)}")
+    return jsonify({'error': 'An unexpected error occurred'}), 500
+
+# Default to secure access denial for unhandled exceptions
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled exception: {str(e)}")
+    return jsonify({'error': 'An unexpected error occurred'}), 500
+
+if __name__ == '__main__':
+    app.run(debug=False)  # Set debug=False in production
+```
+
+### Fail Securely
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Always ensure access control fails securely by defaulting to deny access when errors or exceptions occur. Don't expose sensitive information in error messages."
+}
+
+#### JavaScript Example
+
+```javascript
+// Error handling middleware for secure access control failures
+
+const express = require('express');
+const app = express();
+
+// Mock user authentication
+function authenticate(req, res, next) {
+  try {
+    const userId = req.headers['user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Mock user lookup
+    const user = getUserById(userId);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid user' });
+    }
+    
+    req.user = user;
+    next();
+  } catch (error) {
+    // Log the error but don't expose details in response
+    console.error('Authentication error:', error);
+    
+    // Default to secure denial
+    return res.status(401).json({ error: 'Authentication failed' });
+  }
+}
+
+// Permission check middleware
+function checkPermission(permission) {
+  return (req, res, next) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      if (!userHasPermission(req.user, permission)) {
+        // Log the unauthorized access attempt
+        console.warn(`Permission denied: ${req.user.id} attempted to access ${req.path} requiring ${permission}`);
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+      
+      next();
+    } catch (error) {
+      // Log the error but don't expose details in response
+      console.error('Permission check error:', error);
+      
+      // Default to secure denial
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  };
+}
+
+// Example route handler with secure error handling
+app.get('/api/sensitive-data', authenticate, checkPermission('read:sensitive'), (req, res) => {
+  try {
+    // Access the database or external service
+    const data = getSensitiveData();
+    
+    // Success path
+    res.json(data);
+  } catch (error) {
+    // Log the detailed error for debugging
+    console.error('Error fetching sensitive data:', error);
+    
+    // Default to secure denial without exposing internal details
+    res.status(500).json({ error: 'Unable to retrieve data' });
+  }
+});
+
+// Global error handler that defaults to deny access
+app.use((err, req, res, next) => {
+  // Log the error for debugging
+  console.error('Unhandled application error:', err);
+  
+  // If headers already sent, let Express handle it
+  if (res.headersSent) {
+    return next(err);
+  }
+  
+  // Don't expose error details to client
+  res.status(500).json({ error: 'An unexpected error occurred' });
+});
+
+// Catch-all route handler for undefined endpoints
+app.use((req, res) => {
+  res.status(404).json({ error: 'Resource not found' });
+});
+
+// Helper functions (mocks for this example)
+function getUserById(userId) {
+  // In a real app, this would query a database
+  const users = {
+    'user123': { id: 'user123', role: 'user' },
+    'admin456': { id: 'admin456', role: 'admin' }
+  };
+  return users[userId];
+}
+
+function userHasPermission(user, permission) {
+  // In a real app, this would check against stored permissions
+  const permissions = {
+    'user': ['read:public', 'read:own'],
+    'admin': ['read:public', 'read:own', 'read:sensitive', 'write:any']
+  };
+  
+  return permissions[user.role]?.includes(permission) || false;
+}
+
+function getSensitiveData() {
+  // Simulate potential errors
+  const simulateError = Math.random() < 0.3; // 30% chance of error
+  
+  if (simulateError) {
+    throw new Error('Database connection failed: timeout exceeded connecting to 192.168.1.5');
+  }
+  
+  return {
+    sensitiveInfo: 'This is protected data'
+  };
+}
+
+// Secure route for user data access with ownership check
+app.get('/api/users/:id/profile', authenticate, (req, res) => {
+  try {
+    const targetUserId = req.params.id;
+    const requestingUser = req.user;
+    
+    // Check if user is accessing their own profile or has admin permission
+    const isOwnProfile = targetUserId === requestingUser.id;
+    const isAdmin = requestingUser.role === 'admin';
+    
+    if (!isOwnProfile && !isAdmin) {
+      // Log unauthorized access attempt
+      console.warn(`Unauthorized profile access: ${requestingUser.id} tried to access ${targetUserId}'s profile`);
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Get user profile data
+    const profileData = getUserProfile(targetUserId);
+    
+    // If profile not found, return 404 but don't confirm if user exists
+    if (!profileData) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+    
+    // Success path
+    res.json(profileData);
+  } catch (error) {
+    // Log the error but don't expose details
+    console.error('Error fetching user profile:', error);
+    
+    // Default to secure denial
+    res.status(500).json({ error: 'Unable to retrieve profile' });
+  }
+});
+
+function getUserProfile(userId) {
+  // In a real app, this would query a database
+  const profiles = {
+    'user123': { id: 'user123', name: 'Regular User', email: 'user@example.com' },
+    'admin456': { id: 'admin456', name: 'Admin User', email: 'admin@example.com' }
+  };
+  return profiles[userId];
+}
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+```
+
+#### Python Example
+
+```python
+from flask import Flask, request, jsonify, g
+from functools import wraps
+import logging
+import traceback
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='app.log'
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# Mock user database
+users = {
+    'user123': {'id': 'user123', 'role': 'user', 'name': 'Regular User'},
+    'admin456': {'id': 'admin456', 'role': 'admin', 'name': 'Admin User'}
+}
+
+# Mock permissions
+role_permissions = {
+    'user': ['read:public', 'read:own'],
+    'admin': ['read:public', 'read:own', 'read:sensitive', 'write:any']
+}
+
+# Mock authentication function
+def authenticate():
+    """
+    Authenticate user based on header
+    Returns user object or None
+    """
+    try:
+        user_id = request.headers.get('User-ID')
+        if not user_id or user_id not in users:
+            return None
+        
+        return users[user_id]
+    except Exception as e:
+        # Log the error but don't expose details
+        logger.error(f"Authentication error: {str(e)}")
+        logger.debug(traceback.format_exc())
+        return None
+
+# Check if user has permission
+def user_has_permission(user, permission):
+    """
+    Check if a user has a specific permission
+    """
+    try:
+        if not user or 'role' not in user:
+            return False
+            
+        role = user['role']
+        if role not in role_permissions:
+            return False
+            
+        return permission in role_permissions[role]
+    except Exception as e:
+        # Log the error but don't expose details
+        logger.error(f"Permission check error: {str(e)}")
+        logger.debug(traceback.format_exc())
+        
+        # Default to secure denial
+        return False
+
+# Authentication decorator that fails securely
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        try:
+            user = authenticate()
+            
+            if not user:
+                return jsonify({'error': 'Authentication required'}), 401
+                
+            # Store user in Flask's g object
+            g.user = user
+            return f(*args, **kwargs)
+            
+        except Exception as e:
+            # Log the error but don't expose details
+            logger.error(f"Authentication middleware error: {str(e)}")
+            logger.debug(traceback.format_exc())
+            
+            # Default to secure denial
+            return jsonify({'error': 'Authentication failed'}), 401
+            
+    return decorated
+
+# Permission check decorator that fails securely
+def require_permission(permission):
+    def decorator(f):
+        @wraps(f)
+        @login_required  # Ensure user is authenticated first
+        def decorated_function(*args, **kwargs):
+            try:
+                user = g.user
+                
+                if not user_has_permission(user, permission):
+                    # Log unauthorized access attempt
+                    logger.warning(f"Permission denied: {user['id']} attempted to access {request.path} requiring {permission}")
+                    return jsonify({'error': 'Permission denied'}), 403
+                    
+                return f(*args, **kwargs)
+                
+            except Exception as e:
+                # Log the error but don't expose details
+                logger.error(f"Permission middleware error: {str(e)}")
+                logger.debug(traceback.format_exc())
+                
+                # Default to secure denial
+                return jsonify({'error': 'Access denied'}), 403
+                
+        return decorated_function
+    return decorator
+
+# Ownership check decorator that fails securely
+def require_ownership(resource_fetcher, owner_field):
+    def decorator(f):
+        @wraps(f)
+        @login_required  # Ensure user is authenticated first
+        def decorated_function(*args, **kwargs):
+            try:
+                user = g.user
+                
+                # Get the resource
+                resource = resource_fetcher(kwargs)
+                
+                # If resource doesn't exist, return 404
+                if not resource:
+                    return jsonify({'error': 'Resource not found'}), 404
+                    
+                # Check ownership or admin role
+                is_owner = resource[owner_field] == user['id']
+                is_admin = user['role'] == 'admin'
+                
+                if not is_owner and not is_admin:
+                    # Log unauthorized access attempt
+                    logger.warning(f"Ownership check failed: {user['id']} tried to access resource owned by {resource[owner_field]}")
+                    return jsonify({'error': 'Access denied'}), 403
+                    
+                # Store resource in g for the handler
+                g.resource = resource
+                return f(*args, **kwargs)
+                
+            except Exception as e:
+                # Log the error but don't expose details
+                logger.error(f"Ownership check error: {str(e)}")
+                logger.debug(traceback.format_exc())
+                
+                # Default to secure denial
+                return jsonify({'error': 'Access denied'}), 403
+                
+        return decorated_function
+    return decorator
+
+# Example route with secure error handling
+@app.route('/api/sensitive-data')
+@require_permission('read:sensitive')
+def get_sensitive_data():
+    try:
+        # Access sensitive data (in real app, from database/service)
+        data = get_sensitive_data_from_db()
+        
+        # Success path
+        return jsonify(data)
+    except Exception as e:
+        # Log the detailed error for debugging
+        logger.error(f"Error fetching sensitive data: {str(e)}")
+        logger.debug(traceback.format_exc())
+        
+        # Default to secure denial without exposing internal details
+        return jsonify({'error': 'Unable to retrieve data'}), 500
+
+# Mock user profiles
+profiles = {
+    'user123': {'id': 'user123', 'name': 'Regular User', 'email': 'user@example.com'},
+    'admin456': {'id': 'admin456', 'name': 'Admin User', 'email': 'admin@example.com'}
+}
+
+# Helper function to fetch profile
+def get_profile(kwargs):
+    user_id = kwargs.get('user_id')
+    return profiles.get(user_id)
+
+# Secure route for user data access with ownership check
+@app.route('/api/users/<user_id>/profile')
+@require_ownership(get_profile, 'id')
+def get_user_profile(user_id):
+    try:
+        # g.resource contains the profile data set by require_ownership
+        profile = g.resource
+        
+        # Return the profile data
+        return jsonify(profile)
+    except Exception as e:
+        # Log the error but don't expose details
+        logger.error(f"Error retrieving user profile: {str(e)}")
+        logger.debug(traceback.format_exc())
+        
+        # Default to secure denial
+        return jsonify({'error': 'Unable to retrieve profile'}), 500
+
+# Mock function to get sensitive data
+def get_sensitive_data_from_db():
+    # Simulate potential errors
+    import random
+    if random.random() < 0.3:  # 30% chance of error
+        raise Exception("Database connection failed: timeout exceeded connecting to 192.168.1.5")
+    
+    return {
+        'sensitiveInfo': 'This is protected data'
+    }
+
+# Global error handler
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log the detailed error
+    logger.error(f"Unhandled exception: {str(e)}")
+    logger.debug(traceback.format_exc())
+    
+    # Return generic error without exposing details
+    return jsonify({'error': 'An unexpected error occurred'}), 500
+
+# 404 handler for undefined endpoints
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'error': 'Resource not found'}), 404
+
+if __name__ == '__main__':
+    app.run(debug=False)  # Set debug=False in production
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "client_side_only",
+        "wrong": "Relying solely on client-side access controls (e.g., hiding UI elements, JavaScript checks)",
+        "correct": "Implementing server-side access controls for all sensitive operations and data",
+        "reason": "Client-side controls can be easily bypassed by modifying the client or directly calling APIs"
+    },
+    {
+        "id": "direct_object_references",
+        "wrong": "Using unvalidated direct object references in URLs or parameters",
+        "correct": "Validating that the authenticated user has permission to access the requested resource",
+        "reason": "Attackers can manipulate object identifiers to access unauthorized resources"
+    },
+    {
+        "id": "over_privileged_accounts",
+        "wrong": "Granting users more privileges than needed for their role",
+        "correct": "Following the principle of least privilege, granting only necessary permissions",
+        "reason": "Over-privileged accounts increase the damage potential if an account is compromised"
+    },
+    {
+        "id": "insecure_defaults",
+        "wrong": "Default 'allow' access control settings if a check fails or errors",
+        "correct": "Default 'deny' access control that fails securely",
+        "reason": "Errors or unexpected conditions should never result in unauthorized access"
+    },
+    {
+        "id": "insufficient_logging",
+        "wrong": "Not logging access control failures or unauthorized access attempts",
+        "correct": "Logging all access control decisions, especially failures and suspicious activities",
+        "reason": "Proper logging is essential for detecting attacks and troubleshooting issues"
+    },
+    {
+        "id": "business_logic_bypass",
+        "wrong": "Validating access at the start of a process but not rechecking during multi-step operations",
+        "correct": "Re-validating access control at each step of multi-stage processes",
+        "reason": "Attackers can attempt to bypass controls by manipulating the flow of operations"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Access Control Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Access_Control_Cheat_Sheet.html)
+- [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
+- [OWASP RBAC Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/RBAC_Cheat_Sheet.html)
+- [OWASP Insecure Direct Object Reference Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html)
+
+@version "1.0.0"
+@last_updated "2024-05-01"

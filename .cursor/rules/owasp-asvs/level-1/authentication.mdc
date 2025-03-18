@@ -1,0 +1,456 @@
+---
+description: OWASP ASVS Level 1 requirements for secure authentication implementation
+globs: ["**/*.{js,jsx,ts,tsx,py}"]
+---
+
+# Authentication Security (ASVS Level 1)
+
+@context {
+    "type": "security_rules",
+    "standard": "OWASP ASVS",
+    "version": "4.0",
+    "level": 1,
+    "category": "V2 - Authentication"
+}
+
+## Overview
+
+Authentication is a critical security control that verifies that users are who they claim to be. Level 1 authentication requirements focus on the most essential authentication security practices that all applications should implement.
+
+## Requirements
+
+@rules [
+    {
+        "id": "v2.1.1",
+        "severity": "critical",
+        "description": "User passwords must be stored in a secure format using a strong one-way hashing algorithm with salt",
+        "verification": "Verify that passwords are stored with sufficient protection to prevent offline recovery attacks, including brute force and dictionary attacks"
+    },
+    {
+        "id": "v2.2.1",
+        "severity": "critical",
+        "description": "Anti-automation controls must be in place to prevent brute force attacks",
+        "verification": "Verify that anti-automation controls are effective against credential stuffing, brute force, and account lockout attacks"
+    },
+    {
+        "id": "v2.5.1",
+        "severity": "critical",
+        "description": "Credentials and session identifiers must be transmitted only over TLS",
+        "verification": "Verify that credentials are transported via TLS or another strong transport"
+    },
+    {
+        "id": "v2.10.1",
+        "severity": "critical",
+        "description": "Multi-factor authentication should be implemented for sensitive functions",
+        "verification": "Verify that additional authentication is required before sensitive operations"
+    }
+]
+
+## Implementation Guidelines
+
+### Secure Password Storage
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Never store passwords in plain text or using weak hashing algorithms like MD5 or SHA-1. Always use a strong adaptive hashing function specifically designed for passwords, with proper salt."
+}
+
+#### JavaScript Example (with Node.js)
+
+```javascript
+const bcrypt = require('bcrypt');
+
+// INSECURE: Plain text password storage
+function storePasswordInsecure(username, password) {
+    // NEVER DO THIS!
+    const user = {
+        username: username,
+        password: password  // Plain text password!
+    };
+    return saveUser(user);
+}
+
+// SECURE: Using bcrypt for password hashing
+async function storePasswordSecure(username, password) {
+    // Generate a salt with a cost factor of 12
+    const saltRounds = 12;
+    
+    // Hash the password with the salt
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    
+    const user = {
+        username: username,
+        password: hashedPassword  // Securely hashed password
+    };
+    
+    return saveUser(user);
+}
+
+// SECURE: Password verification
+async function verifyPassword(username, inputPassword) {
+    const user = await findUserByUsername(username);
+    if (!user) return false;
+    
+    // Compare input password with stored hash
+    return await bcrypt.compare(inputPassword, user.password);
+}
+```
+
+#### Python Example
+
+```python
+import bcrypt
+from passlib.hash import argon2
+
+# INSECURE: Plain text password storage
+def store_password_insecure(username, password):
+    # NEVER DO THIS!
+    user = {
+        'username': username,
+        'password': password  # Plain text password!
+    }
+    return save_user(user)
+
+# SECURE: Using bcrypt for password hashing
+def store_password_secure_bcrypt(username, password):
+    # Generate a salt and hash the password
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt(rounds=12)  # Adjust rounds for security/performance balance
+    hashed_password = bcrypt.hashpw(password_bytes, salt)
+    
+    user = {
+        'username': username,
+        'password': hashed_password.decode('utf-8')  # Store as string
+    }
+    
+    return save_user(user)
+    
+# Even more SECURE: Using Argon2 (more modern)
+def store_password_secure_argon2(username, password):
+    # Argon2 is the winner of the Password Hashing Competition
+    hashed_password = argon2.hash(password)
+    
+    user = {
+        'username': username,
+        'password': hashed_password
+    }
+    
+    return save_user(user)
+
+# SECURE: Password verification with bcrypt
+def verify_password_bcrypt(username, input_password):
+    user = find_user_by_username(username)
+    if not user:
+        return False
+    
+    input_password_bytes = input_password.encode('utf-8')
+    stored_hash_bytes = user['password'].encode('utf-8')
+    
+    # Compare using constant-time comparison
+    return bcrypt.checkpw(input_password_bytes, stored_hash_bytes)
+
+# SECURE: Password verification with Argon2
+def verify_password_argon2(username, input_password):
+    user = find_user_by_username(username)
+    if not user:
+        return False
+    
+    # Verify using constant-time comparison
+    return argon2.verify(input_password, user['password'])
+```
+
+### Brute Force Prevention
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Implement rate limiting, account lockout mechanisms, CAPTCHA, or increasing delays to prevent brute force and credential stuffing attacks."
+}
+
+#### JavaScript Example (with Express.js)
+
+```javascript
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const app = express();
+
+// SECURE: Implement rate limiting for login attempts
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Limit each IP to 5 login requests per window
+    message: 'Too many login attempts, please try again after 15 minutes',
+    standardHeaders: true, // Return rate limit info in the headers
+    legacyHeaders: false, // Disable the X-RateLimit-* headers
+});
+
+// Apply rate limiting to login endpoint
+app.post('/api/login', loginLimiter, (req, res) => {
+    // Login logic here
+});
+
+// SECURE: Implement account lockout
+async function handleLoginAttempt(username, password) {
+    const user = await findUserByUsername(username);
+    
+    // If user doesn't exist, still perform fake hash to prevent timing attacks
+    if (!user) {
+        await performFakeHash();
+        return { success: false, message: 'Invalid username or password' };
+    }
+    
+    // Check if account is locked
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+        const waitMinutes = Math.ceil((user.lockedUntil - new Date()) / (60 * 1000));
+        return {
+            success: false,
+            message: `Account is locked. Please try again in ${waitMinutes} minutes.`
+        };
+    }
+    
+    // Verify password
+    const passwordCorrect = await verifyPassword(username, password);
+    
+    if (passwordCorrect) {
+        // Reset failed attempts on successful login
+        await updateFailedAttempts(username, 0, null);
+        return { success: true, user: sanitizeUser(user) };
+    } else {
+        // Increment failed attempts
+        const failedAttempts = (user.failedAttempts || 0) + 1;
+        let lockedUntil = null;
+        
+        // Lock account after 5 failed attempts
+        if (failedAttempts >= 5) {
+            lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+        }
+        
+        await updateFailedAttempts(username, failedAttempts, lockedUntil);
+        
+        return {
+            success: false,
+            message: lockedUntil
+                ? `Too many failed attempts. Account locked for 15 minutes.`
+                : `Invalid username or password. ${5 - failedAttempts} attempts remaining.`
+        };
+    }
+}
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from datetime import datetime, timedelta
+import time
+
+app = Flask(__name__)
+
+# SECURE: Implement rate limiting
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
+
+# Apply stricter rate limiting to login endpoint
+@app.route("/api/login", methods=["POST"])
+@limiter.limit("5 per 15 minute")  # Limit to 5 requests per 15 minutes
+def login():
+    # Login logic here
+    pass
+
+# SECURE: Implement account lockout
+def handle_login_attempt(username, password):
+    user = find_user_by_username(username)
+    
+    # If user doesn't exist, still perform fake work to prevent timing attacks
+    if not user:
+        perform_fake_hash()
+        return {"success": False, "message": "Invalid username or password"}
+    
+    # Check if account is locked
+    if user.get('locked_until') and user['locked_until'] > datetime.now():
+        wait_minutes = int((user['locked_until'] - datetime.now()).total_seconds() / 60) + 1
+        return {
+            "success": False,
+            "message": f"Account is locked. Please try again in {wait_minutes} minutes."
+        }
+    
+    # Verify password
+    if verify_password(username, password):
+        # Reset failed attempts on successful login
+        update_failed_attempts(username, 0, None)
+        return {"success": True, "user": sanitize_user(user)}
+    else:
+        # Increment failed attempts
+        failed_attempts = (user.get('failed_attempts') or 0) + 1
+        locked_until = None
+        
+        # Lock account after 5 failed attempts
+        if failed_attempts >= 5:
+            locked_until = datetime.now() + timedelta(minutes=15)  # 15 minutes
+        
+        update_failed_attempts(username, failed_attempts, locked_until)
+        
+        if locked_until:
+            message = "Too many failed attempts. Account locked for 15 minutes."
+        else:
+            message = f"Invalid username or password. {5 - failed_attempts} attempts remaining."
+            
+        return {"success": False, "message": message}
+```
+
+### Secure Credential Transmission
+
+@implementation {
+    "languages": ["javascript", "python"],
+    "rule": "Always use HTTPS/TLS for transmitting credentials. Never send credentials in URLs or plain HTTP requests."
+}
+
+#### JavaScript Example (Client-side)
+
+```javascript
+// INSECURE: Sending credentials as URL parameters
+function loginInsecure(username, password) {
+    // NEVER DO THIS!
+    return fetch(`/api/login?username=${username}&password=${password}`);
+}
+
+// INSECURE: Using HTTP instead of HTTPS
+function loginWithHttp(username, password) {
+    // NEVER DO THIS!
+    return fetch('http://example.com/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+}
+
+// SECURE: Using HTTPS and POST body
+function loginSecure(username, password) {
+    return fetch('https://example.com/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+        credentials: 'same-origin' // Send cookies for same-origin requests
+    });
+}
+
+// SECURE: Setting secure and httpOnly cookies on the server
+// (Node.js Express example)
+app.post('/api/login', async (req, res) => {
+    const { username, password } = req.body;
+    
+    // Verify credentials
+    const user = await authenticateUser(username, password);
+    
+    if (user) {
+        // Set session cookie with secure attributes
+        res.cookie('session', generateSessionToken(), {
+            httpOnly: true,     // Prevents JavaScript access
+            secure: true,       // Only sent over HTTPS
+            sameSite: 'strict', // Helps prevent CSRF
+            maxAge: 3600000     // Expires in 1 hour
+        });
+        
+        res.json({ success: true });
+    } else {
+        res.status(401).json({ success: false });
+    }
+});
+```
+
+#### Python Example (with Flask)
+
+```python
+from flask import Flask, request, jsonify, make_response, session
+import os
+
+app = Flask(__name__)
+app.config.update(
+    SESSION_COOKIE_SECURE=True,      # Only sent over HTTPS
+    SESSION_COOKIE_HTTPONLY=True,    # Prevents JavaScript access
+    SESSION_COOKIE_SAMESITE='Strict' # Helps prevent CSRF
+)
+
+# Generate a strong secret key for sessions
+app.secret_key = os.urandom(24)
+
+# INSECURE: Sending credentials via GET parameters (never do this)
+@app.route('/api/login', methods=['GET'])
+def login_insecure():
+    # NEVER DO THIS!
+    username = request.args.get('username')
+    password = request.args.get('password')
+    # Authentication logic...
+
+# SECURE: Using POST method and HTTPS
+@app.route('/api/login', methods=['POST'])
+def login_secure():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    # Verify credentials
+    user = authenticate_user(username, password)
+    
+    if user:
+        # Store user ID in session
+        session['user_id'] = user['id']
+        
+        # Create response with secure session cookie
+        response = make_response(jsonify({"success": True}))
+        return response
+    else:
+        return jsonify({"success": False}), 401
+
+# Server configuration in production:
+if __name__ == '__main__':
+    # In production, ensure Flask runs with HTTPS
+    # This is typically handled by a reverse proxy in production
+    app.run(ssl_context='adhoc')  # For development only
+    
+    # In production, use proper TLS certificates:
+    # app.run(ssl_context=('cert.pem', 'key.pem'))
+```
+
+## Common Mistakes to Avoid
+
+@mistakes [
+    {
+        "id": "plaintext_passwords",
+        "wrong": "Storing passwords in plain text or using weak hashing algorithms (MD5, SHA-1)",
+        "correct": "Using strong adaptive hashing algorithms with salt (bcrypt, Argon2, PBKDF2)",
+        "reason": "Plain text or weakly hashed passwords can be easily compromised in a data breach"
+    },
+    {
+        "id": "insecure_transmission",
+        "wrong": "Sending credentials via HTTP or as URL parameters",
+        "correct": "Using HTTPS with POST requests and secure cookies",
+        "reason": "Credentials sent over HTTP or in URLs can be intercepted or leaked in logs"
+    },
+    {
+        "id": "no_brute_force_protection",
+        "wrong": "Having no limits on authentication attempts",
+        "correct": "Implementing rate limiting, account lockout, or increasing delays",
+        "reason": "Without these protections, attackers can perform brute force attacks indefinitely"
+    },
+    {
+        "id": "hardcoded_credentials",
+        "wrong": "Embedding credentials in source code",
+        "correct": "Using secure environment variables or a secrets management service",
+        "reason": "Hardcoded credentials in source code can be discovered through code review or repository access"
+    }
+]
+
+## Additional Resources
+
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [OWASP Forgot Password Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html)
+- [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+
+@version "1.0.0"
+@last_updated "2024-05-01"
