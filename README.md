@@ -34,7 +34,3 @@ This repository implements two ASVS security levels:
 ## Contributors
 
 This project was created to promote secure coding practices and help developers build more secure applications.
-
-## License
-
-MIT
