@@ -17,39 +17,6 @@ Each rule includes code examples for:
 - Python
 - C# (Dotnet)
 
-## How to Use
-
-1. Clone this repository
-2. Copy the `.cursor` directory to your project's root folder
-3. Cursor will automatically use these secure coding rules when coding in your project
-
-## Project Structure
-
-This repository contains MDC rules organized by ASVS security level and category:
-
-```
-.cursor/rules/owasp-asvs/
-├── level-1/         # Essential security requirements (minimal)
-│   ├── input-validation.mdc
-│   ├── input-validation-dotnet.mdc
-│   ├── authentication.mdc
-│   ├── authentication-dotnet.mdc
-│   ├── session-management.mdc
-│   ├── session-management-dotnet.mdc
-│   ├── access-control.mdc
-│   ├── access-control-dotnet.mdc
-│   ├── cryptography.mdc
-│   ├── cryptography-dotnet.mdc
-│   └── ...
-│
-└── level-2/         # Standard security requirements (comprehensive)
-    ├── input-validation.mdc
-    ├── input-validation-dotnet.mdc
-    ├── authentication.mdc
-    ├── authentication-dotnet.mdc
-    └── ...
-```
-
 ## Security Levels
 
 This repository implements two ASVS security levels:
@@ -58,6 +25,11 @@ This repository implements two ASVS security levels:
 
 **Level 2 (L2)**: Standard security requirements for applications that contain sensitive data. Includes everything from L1 plus more comprehensive defensive techniques.
 
+## How to Use
+
+1. Clone this repository
+2. Copy the `.cursor` directory to your project's root folder
+3. Cursor will automatically use these secure coding rules when coding in your project
 
 ## Contributors
 
